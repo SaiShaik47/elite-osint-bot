@@ -259,6 +259,7 @@ function getOrCreateUser(ctx) {
 
   if (!telegramId) return null;
 
+  // Check if user exists, if not create new user
   if (!users.has(telegramId)) {
     users.set(telegramId, {
       telegramId,
@@ -365,7 +366,9 @@ Your account is pending approval by our admin team.
 • /tempmail - Temporary email
 • /stats - Bot statistics
 • /credits - Your credits
-• /help - Detailed help
+• /checkstatus - Check registration status
+• /sync - Sync registration (if approved but lost access)
+• /help - Show this help message
 
 💎 **Premium Features:**
  ${user.isPremium ? '✅ Unlimited queries' : '🔒 Upgrade for unlimited queries'}
@@ -478,18 +481,22 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
     return;
   }
 
-  const user = users.get(targetUserId) || {
-    telegramId: targetUserId,
-    username: request.username,
-    firstName: request.firstName,
-    lastName: request.lastName,
-    isApproved: false,
-    credits: 0,
-    isPremium: false,
-    isAdmin: false,
-    totalQueries: 0,
-    registrationDate: new Date()
-  };
+  // Check if user already exists
+  let user = users.get(targetUserId);
+  if (!user) {
+    user = {
+      telegramId: targetUserId,
+      username: request.username,
+      firstName: request.firstName,
+      lastName: request.lastName,
+      isApproved: false,
+      credits: 0,
+      isPremium: false,
+      isAdmin: false,
+      totalQueries: 0,
+      registrationDate: new Date()
+    };
+  }
 
   if (action === 'approve') {
     user.isApproved = true;
@@ -1471,6 +1478,8 @@ bot.command('help', async (ctx) => {
 • /tempmail - Generate temporary email address
 • /stats - View your usage statistics
 • /credits - Check your credit balance
+• /checkstatus - Check registration status
+• /sync - Sync registration (if approved but lost access)
 
 💎 **Premium Benefits:**
 • 🔄 Unlimited queries per day
@@ -2527,6 +2536,74 @@ bot.command('backup', async (ctx) => {
 💾 *This feature requires additional implementation*`;
 
   await sendFormattedMessage(ctx, message);
+});
+
+// Check registration status command
+bot.command('checkstatus', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId) return;
+
+  // Check if user exists in users map
+  const user = users.get(telegramId);
+  if (user) {
+    const statusMessage = `📋 **Your Registration Status** 📋
+
+👤 **Account Information:**
+• Telegram ID: ${telegramId}
+• Username: @${user.username || 'N/A'}
+• Status: ${user.isApproved ? '✅ Approved' : '❌ Not Approved'}
+• Credits: ${user.credits} 🪙
+• Premium: ${user.isPremium ? '💎 Yes' : '🔹 No'}
+
+📅 **Registration Date:** ${user.registrationDate.toLocaleDateString()}
+
+${!user.isApproved ? '\n⏳ *Your account is pending approval. Please wait for admin to review your request.*' : '\n✅ *Your account is approved and ready to use!*'}`;
+
+    await sendFormattedMessage(ctx, statusMessage);
+  } else {
+    // Check if there's a pending registration request
+    const request = registrationRequests.get(telegramId);
+    if (request) {
+      await sendFormattedMessage(ctx, '⏳ *Your registration is pending approval.*\n\nPlease wait for the admin to review your request.');
+    } else {
+      await sendFormattedMessage(ctx, '❌ *No registration found.*\n\nPlease use /register to submit your registration request.');
+    }
+  }
+});
+
+// Sync registration command (for users who were approved but lost data)
+bot.command('sync', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId) return;
+
+  const user = users.get(telegramId);
+  if (user && user.isApproved) {
+    await sendFormattedMessage(ctx, '✅ *Your account is already synced and approved!*');
+    return;
+  }
+
+  // For demo purposes, auto-approve if admin ID (remove in production)
+  if (telegramId === adminId) {
+    const adminUser = {
+      telegramId,
+      username: ctx.from?.username || 'fuck_sake',
+      firstName: ctx.from?.first_name || 'Admin',
+      lastName: ctx.from?.last_name || '',
+      isAdmin: true,
+      isApproved: true,
+      credits: 999999,
+      isPremium: true,
+      totalQueries: 0,
+      registrationDate: new Date()
+    };
+    users.set(telegramId, adminUser);
+    await sendFormattedMessage(ctx, '✅ *Admin account synced successfully!*');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '❌ *No approved registration found.*\n\nPlease contact admin or register with /register.');
 });
 
 // Test command
