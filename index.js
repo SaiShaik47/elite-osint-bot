@@ -278,6 +278,12 @@ function getOrCreateUser(ctx) {
   return users.get(telegramId);
 }
 
+// Helper function to check if user is admin
+function isAdmin(userId) {
+  const user = users.get(userId);
+  return user && (user.isAdmin || userId === adminId);
+}
+
 // Helper function to send formatted messages
 async function sendFormattedMessage(ctx, text) {
   try {
@@ -464,7 +470,7 @@ bot.command('register', async (ctx) => {
 bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await ctx.answerCallbackQuery('❌ Only admins can process registrations.');
     return;
   }
@@ -1514,13 +1520,14 @@ bot.command('help', async (ctx) => {
 // Admin command
 bot.command('admin', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
-  const user = getOrCreateUser(ctx);
   
   // Check if user is admin (either original admin or made admin)
-  if (!telegramId || !user.isAdmin) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
+
+  const user = getOrCreateUser(ctx);
 
   const pendingCount = registrationRequests.size;
   const totalUsers = users.size;
@@ -1587,7 +1594,7 @@ bot.command('admin', async (ctx) => {
 bot.command('give', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1640,7 +1647,7 @@ bot.command('give', async (ctx) => {
 bot.command('premium', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1699,7 +1706,7 @@ bot.command('premium', async (ctx) => {
 bot.command('makeadmin', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1755,7 +1762,7 @@ bot.command('makeadmin', async (ctx) => {
 bot.command('removeadmin', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1811,7 +1818,7 @@ bot.command('removeadmin', async (ctx) => {
 bot.command('checkuser', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1854,7 +1861,7 @@ bot.command('checkuser', async (ctx) => {
 bot.command('users', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1883,7 +1890,7 @@ bot.command('users', async (ctx) => {
 bot.command('topusers', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1922,7 +1929,7 @@ bot.command('topusers', async (ctx) => {
 bot.command('premiumlist', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1956,7 +1963,7 @@ bot.command('premiumlist', async (ctx) => {
 bot.command('registrations', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -1988,7 +1995,7 @@ bot.command('registrations', async (ctx) => {
 bot.command('approve', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2061,7 +2068,7 @@ bot.command('approve', async (ctx) => {
 bot.command('reject', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2113,7 +2120,7 @@ bot.command('reject', async (ctx) => {
 bot.command('approveall', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2205,7 +2212,7 @@ ${approvedUsers.map((user, index) => `${index + 1}. @${user.username} (${user.us
 bot.command('adminstats', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2245,7 +2252,7 @@ bot.command('adminstats', async (ctx) => {
 bot.command('activity', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2277,7 +2284,7 @@ bot.command('activity', async (ctx) => {
 bot.command('revenue', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2313,7 +2320,7 @@ bot.command('revenue', async (ctx) => {
 bot.command('broadcast', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2359,7 +2366,7 @@ bot.command('broadcast', async (ctx) => {
 bot.command('announce', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2420,7 +2427,7 @@ bot.command('announce', async (ctx) => {
 bot.command('lucky', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2478,7 +2485,7 @@ bot.command('lucky', async (ctx) => {
 bot.command('reset_daily', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2498,7 +2505,7 @@ bot.command('reset_daily', async (ctx) => {
 bot.command('maintenance', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2522,7 +2529,7 @@ bot.command('maintenance', async (ctx) => {
 bot.command('masspremium', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2546,7 +2553,7 @@ bot.command('masspremium', async (ctx) => {
 bot.command('resetuser', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2576,7 +2583,7 @@ bot.command('resetuser', async (ctx) => {
 bot.command('logs', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2605,7 +2612,7 @@ bot.command('logs', async (ctx) => {
 bot.command('backup', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || telegramId !== adminId) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2677,7 +2684,7 @@ bot.command('sync', async (ctx) => {
     return;
   }
 
-  // For demo purposes, auto-approve if admin ID (remove in production)
+  // Auto-approve if admin ID (original admin)
   if (telegramId === adminId) {
     const adminUser = {
       telegramId,
@@ -2696,7 +2703,8 @@ bot.command('sync', async (ctx) => {
     return;
   }
 
-  await sendFormattedMessage(ctx, '❌ *No approved registration found.*\n\nPlease contact admin or register with /register.');
+  // Note: Made admins need to be manually restored by original admin if bot restarts
+  await sendFormattedMessage(ctx, '❌ *No approved registration found.*\n\n📋 **If you were made admin but lost access:**\n• Contact the original admin (@fuck_sake)\n• Or use /register to submit new request\n\n💡 *Made admins lose access if bot restarts - this is normal for security.*');
 });
 
 // Test command
