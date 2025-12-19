@@ -1297,8 +1297,10 @@ bot.command('help', async (ctx) => {
 // Admin command
 bot.command('admin', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
+  const user = getOrCreateUser(ctx);
   
-  if (!telegramId || telegramId !== adminId) {
+  // Check if user is admin (either original admin or made admin)
+  if (!telegramId || !user.isAdmin) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
