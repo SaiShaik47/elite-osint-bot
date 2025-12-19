@@ -64,6 +64,15 @@ async function getPhoneNumberInfo(number) {
   }
 }
 
+async function getBasicNumberInfo(number) {
+  try {
+    const response = await axios.get(`https://ab-calltraceapi.vercel.app/info?number=${number}`);
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch basic number information' };
+  }
+}
+
 async function getInstagramInfo(username) {
   try {
     const response = await axios.get(`https://newinstainfoapi.anshppt19.workers.dev/info?username=${username}`);
@@ -322,6 +331,7 @@ Your account is pending approval by our admin team.
 • /ip <address> - IP intelligence
 • /email <email> - Email validation
 • /num <number> - Phone number lookup
+• /basicnum <number> - Basic number information
 • /paknum <number> - Pakistani number lookup
 • /ig <username> - Instagram intelligence
 • /bin <number> - BIN lookup
@@ -636,6 +646,44 @@ bot.command('num', async (ctx) => {
   } catch (error) {
     console.error('Error in num command:', error);
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up phone number.');
+  }
+});
+
+bot.command('basicnum', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  const number = ctx.match;
+  if (!number) {
+    await sendFormattedMessage(ctx, '📱 *Usage: /basicnum <phone number>*\n\nExample: /basicnum 919087654321');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🔍 *Getting basic number information...*');
+
+  try {
+    const result = await getBasicNumberInfo(number.toString());
+    
+    if (result.success && result.data) {
+      const response = `📱 **Basic Number Information** 📱
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 *Basic number information for educational purposes only*`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      await sendFormattedMessage(ctx, '❌ Failed to get basic number information. Please check the number and try again.');
+    }
+  } catch (error) {
+    console.error('Error in basicnum command:', error);
+    await sendFormattedMessage(ctx, '❌ An error occurred while getting basic number information.');
   }
 });
 
@@ -1194,6 +1242,7 @@ bot.command('help', async (ctx) => {
 👤 **Social & Contact:**
 • /email <email> - Email validation and analysis
 • /num <number> - International phone lookup
+• /basicnum <number> - Basic number information
 • /paknum <number> - Pakistani number details
 • /ig <username> - Instagram profile intelligence
 
@@ -1225,6 +1274,8 @@ bot.command('help', async (ctx) => {
 📝 **Usage Examples:**
 • /ip 8.8.8.8
 • /email user@example.com
+• /num 9389482769
+• /basicnum 919087654321
 • /paknum 03005854962
 • /ig instagram
 • /snap https://snapchat.com/t/H2D8zTxt
@@ -2270,7 +2321,7 @@ bot.command('backup', async (ctx) => {
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /myip\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /admin (for admin)');
 });
 
 // Error handling with conflict resolution
