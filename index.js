@@ -500,7 +500,7 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
 
   if (action === 'approve') {
     user.isApproved = true;
-    user.credits = 100; // Give starting credits
+    user.credits = 25; // Give starting credits
     users.set(targetUserId, user);
     registrationRequests.delete(targetUserId);
 
@@ -509,7 +509,7 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
 ✅ *Congratulations! Your registration has been approved.*
 
 💎 **Welcome Benefits:**
-• 100 starting credits 🪙
+• 25 starting credits 🪙
 • Full access to all OSINT tools
 • Premium features available
 
@@ -1549,6 +1549,7 @@ bot.command('admin', async (ctx) => {
 • /registrations - 📋 View pending registrations
 • /approve <user_id> - ✅ Approve registration
 • /reject <user_id> - ❌ Reject registration
+• /approveall - ✅ Approve all pending registrations
 
 📊 📈 **Statistics & Analytics:**
 • /stats - 📊 Complete bot statistics
@@ -2018,7 +2019,7 @@ bot.command('approve', async (ctx) => {
   };
 
   user.isApproved = true;
-  user.credits = 100;
+  user.credits = 25;
   users.set(targetUserId, user);
   registrationRequests.delete(targetUserId);
 
@@ -2027,7 +2028,7 @@ bot.command('approve', async (ctx) => {
 ✅ *Congratulations! Your registration has been approved.*
 
 💎 **Welcome Benefits:**
-• 100 starting credits 🪙
+• 25 starting credits 🪙
 • Full access to all OSINT tools
 • Premium features available
 
@@ -2045,7 +2046,7 @@ bot.command('approve', async (ctx) => {
 👤 **User Details:**
 • User ID: ${targetUserId}
 • Username: @${user.username || 'N/A'}
-• Credits Granted: 100
+• Credits Granted: 25
 
 🎯 **Action Completed:**
 • Status: Approved ✅
@@ -2104,6 +2105,98 @@ bot.command('reject', async (ctx) => {
 • Timestamp: ${new Date().toLocaleString()}
 
 💎 *User has been notified about rejection*`;
+
+  await sendFormattedMessage(ctx, adminMessage);
+});
+
+// Approve all pending registrations command
+bot.command('approveall', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || telegramId !== adminId) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  if (registrationRequests.size === 0) {
+    await sendFormattedMessage(ctx, '📋 **No Pending Registrations** 📋\n\n✅ All registration requests have been processed.');
+    return;
+  }
+
+  const pendingRequests = Array.from(registrationRequests.values());
+  const approvedUsers = [];
+
+  // Process all pending registrations
+  for (const request of registrationRequests.values()) {
+    const targetUserId = request.telegramId;
+    
+    // Check if user already exists
+    let user = users.get(targetUserId);
+    if (!user) {
+      user = {
+        telegramId: targetUserId,
+        username: request.username,
+        firstName: request.firstName,
+        lastName: request.lastName,
+        isApproved: false,
+        credits: 0,
+        isPremium: false,
+        isAdmin: false,
+        totalQueries: 0,
+        registrationDate: new Date()
+      };
+    }
+
+    // Approve the user
+    user.isApproved = true;
+    user.credits = 25; // Give starting credits
+    users.set(targetUserId, user);
+    approvedUsers.push({
+      userId: targetUserId,
+      username: request.username || 'N/A'
+    });
+
+    // Notify the user
+    const userMessage = `🎉 **Registration Approved!** 🎉
+
+✅ *Congratulations! Your registration has been approved.*
+
+💎 **Welcome Benefits:**
+• 25 starting credits 🪙
+• Full access to all OSINT tools
+• Premium features available
+
+🚀 **Get Started:**
+• Use /start to see all available commands
+• Try /help for detailed instructions
+• Check /credits to see your balance
+
+⚡ *Thank you for joining our OSINT community!*`;
+
+    await notifyUser(targetUserId, userMessage);
+  }
+
+  // Clear all registration requests
+  const totalApproved = pendingRequests.length;
+  registrationRequests.clear();
+
+  // Send confirmation to admin
+  const adminMessage = `✅ **All Registrations Approved Successfully** ✅
+
+📊 **Approval Summary:**
+• Total Approved: ${totalApproved} users
+• Credits per User: 25 🪙
+• Total Credits Distributed: ${totalApproved * 25} 🪙
+
+👥 **Approved Users:**
+${approvedUsers.map((user, index) => `${index + 1}. @${user.username} (${user.userId})`).join('\n')}
+
+🎯 **Action Completed:**
+• Status: All Approved ✅
+• Processed by: @${ctx.from?.username}
+• Timestamp: ${new Date().toLocaleString()}
+
+💎 *All users have been notified about their approval*`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
