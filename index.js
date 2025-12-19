@@ -236,6 +236,20 @@ function getUserAgentInfo() {
   };
 }
 
+// Helper function to deduct credits
+function deductCredits(user, amount = 1) {
+  if (user.isPremium) {
+    return true; // Premium users don't lose credits
+  }
+  
+  if (user.credits >= amount) {
+    user.credits -= amount;
+    return true;
+  }
+  
+  return false;
+}
+
 // Helper function to get or create user
 function getOrCreateUser(ctx) {
   const telegramId = ctx.from?.id.toString();
@@ -547,6 +561,12 @@ bot.command('ip', async (ctx) => {
     return;
   }
 
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
   const ip = ctx.match || 'self';
   await sendFormattedMessage(ctx, '🔍 *Fetching IP intelligence...*');
 
@@ -560,16 +580,21 @@ bot.command('ip', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *IP information for educational purposes only*`;
+💡 *IP information for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please check the IP address and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please check the IP address and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ip command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while fetching IP information.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching IP information.\n💳 1 credit refunded');
   }
 });
 
@@ -577,6 +602,12 @@ bot.command('email', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -598,16 +629,21 @@ bot.command('email', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Email validation for educational purposes only*`;
+💡 *Email validation for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to validate email address. Please check the email and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to validate email address. Please check the email and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in email command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while validating email address.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while validating email address.\n💳 1 credit refunded');
   }
 });
 
@@ -615,6 +651,12 @@ bot.command('num', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -636,16 +678,21 @@ bot.command('num', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Phone number information for educational purposes only*`;
+💡 *Phone number information for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to lookup phone number. Please check the number and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to lookup phone number. Please check the number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in num command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while looking up phone number.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up phone number.\n💳 1 credit refunded');
   }
 });
 
@@ -653,6 +700,12 @@ bot.command('basicnum', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -674,16 +727,21 @@ bot.command('basicnum', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Basic number information for educational purposes only*`;
+💡 *Basic number information for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to get basic number information. Please check the number and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to get basic number information. Please check the number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in basicnum command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while getting basic number information.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while getting basic number information.\n💳 1 credit refunded');
   }
 });
 
@@ -691,6 +749,12 @@ bot.command('paknum', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -712,16 +776,21 @@ bot.command('paknum', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Pakistani number information for educational purposes only*`;
+💡 *Pakistani number information for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to lookup Pakistani number. Please check the number and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to lookup Pakistani number. Please check the number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in paknum command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani number.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani number.\n💳 1 credit refunded');
   }
 });
 
@@ -729,6 +798,12 @@ bot.command('ig', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -750,16 +825,21 @@ bot.command('ig', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Instagram information for educational purposes only*`;
+💡 *Instagram information for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to fetch Instagram information. Please check the username and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch Instagram information. Please check the username and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ig command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Instagram information.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Instagram information.\n💳 1 credit refunded');
   }
 });
 
@@ -767,6 +847,12 @@ bot.command('bin', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -788,16 +874,21 @@ bot.command('bin', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *BIN information for educational purposes only*`;
+💡 *BIN information for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to lookup BIN information. Please check the BIN and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to lookup BIN information. Please check the BIN and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in bin command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while looking up BIN information.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up BIN information.\n💳 1 credit refunded');
   }
 });
 
@@ -805,6 +896,12 @@ bot.command('vehicle', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -826,16 +923,21 @@ bot.command('vehicle', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Vehicle information for educational purposes only*`;
+💡 *Vehicle information for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to fetch vehicle details. Please check the vehicle number and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch vehicle details. Please check the vehicle number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in vehicle command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while fetching vehicle details.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching vehicle details.\n💳 1 credit refunded');
   }
 });
 
@@ -843,6 +945,12 @@ bot.command('ff', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -864,16 +972,21 @@ bot.command('ff', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Free Fire statistics for educational purposes only*`;
+💡 *Free Fire statistics for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to fetch Free Fire statistics. Please check the UID and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch Free Fire statistics. Please check the UID and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ff command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Free Fire statistics.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Free Fire statistics.\n💳 1 credit refunded');
   }
 });
 
@@ -881,6 +994,12 @@ bot.command('terabox', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -898,7 +1017,8 @@ bot.command('terabox', async (ctx) => {
 
 🔗 *Link received:* ${link}
 
-💡 *This feature is currently under development*`;
+💡 *This feature is currently under development*
+• 1 credit deducted from your balance`;
 
   await sendFormattedMessage(ctx, response);
   user.totalQueries++;
@@ -909,6 +1029,12 @@ bot.command('snap', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
@@ -930,16 +1056,21 @@ bot.command('snap', async (ctx) => {
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Snapchat video download for educational purposes only*`;
+💡 *Snapchat video download for educational purposes only*
+• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      await sendFormattedMessage(ctx, '❌ Failed to download Snapchat video. Please check the URL and try again.');
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to download Snapchat video. Please check the URL and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in snap command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Snapchat video.');
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Snapchat video.\n💳 1 credit refunded');
   }
 });
 
