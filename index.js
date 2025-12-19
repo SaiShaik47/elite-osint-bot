@@ -45,15 +45,6 @@ users.set(adminId, {
 });
 
 // API Functions
-async function getImeiInfo(imei) {
-  try {
-    const response = await axios.get(`https://ng-imei-info.vercel.app/?imei_num=${imei}`);
-    return { success: true, data: response.data };
-  } catch (error) {
-    return { success: false, error: 'Failed to fetch IMEI information' };
-  }
-}
-
 async function getIpInfo(ip) {
   try {
     const url = ip ? `https://ipinfo.io/${ip}/json` : 'https://ipinfo.io/json';
@@ -167,20 +158,44 @@ async function validateEmail(email) {
   }
 }
 
-async function getDomainInfo(domain) {
+// Social Media Video Downloader API Functions
+async function downloadSnapchat(videoUrl) {
   try {
-    return {
-      success: true,
-      data: {
-        domain: domain,
-        status: 'active',
-        registrar: 'Unknown',
-        created_date: 'Unknown',
-        expires_date: 'Unknown'
-      }
-    };
+    const apiUrl = `http://15.204.130.9:5150/snap?video=${encodeURIComponent(videoUrl)}`;
+    const response = await axios.get(apiUrl, { timeout: 30000 });
+    return { success: true, data: response.data };
   } catch (error) {
-    return { success: false, error: 'Failed to fetch domain information' };
+    return { success: false, error: 'Failed to download Snapchat video' };
+  }
+}
+
+async function downloadInstagram(videoUrl) {
+  try {
+    const apiUrl = `http://15.204.130.9:5150/insta?video=${encodeURIComponent(videoUrl)}`;
+    const response = await axios.get(apiUrl, { timeout: 30000 });
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to download Instagram video' };
+  }
+}
+
+async function downloadPinterest(videoUrl) {
+  try {
+    const apiUrl = `http://15.204.130.9:5150/pin?video=${encodeURIComponent(videoUrl)}`;
+    const response = await axios.get(apiUrl, { timeout: 30000 });
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to download Pinterest video' };
+  }
+}
+
+async function downloadFacebook(videoUrl) {
+  try {
+    const apiUrl = `http://15.204.130.9:5150/fb?video=${encodeURIComponent(videoUrl)}`;
+    const response = await axios.get(apiUrl, { timeout: 30000 });
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to download Facebook video' };
   }
 }
 
@@ -279,7 +294,7 @@ bot.command('start', async (ctx) => {
   const user = getOrCreateUser(ctx);
   
   if (!user.isApproved) {
-    const welcomeMessage = `🚀 **Welcome to the Premium OSINT Bot** 🚀
+    const welcomeMessage = `🚀 **Welcome to Premium OSINT Bot** 🚀
 
 ✨ *Your Ultimate Open Source Intelligence Assistant* ✨
 
@@ -299,15 +314,13 @@ Your account is pending approval by our admin team.
     return;
   }
 
-  const welcomeMessage = `🚀 **Welcome to the Premium OSINT Bot** 🚀
+  const welcomeMessage = `🚀 **Welcome to Premium OSINT Bot** 🚀
 
 ✨ *Your Ultimate Open Source Intelligence Assistant* ✨
 
 🔍 **Advanced Lookup Tools:**
-• /imei <number> - IMEI number analysis
 • /ip <address> - IP intelligence
 • /email <email> - Email validation
-• /domain <domain> - DNS analysis
 • /num <number> - Phone number lookup
 • /paknum <number> - Pakistani number lookup
 • /ig <username> - Instagram intelligence
@@ -315,6 +328,12 @@ Your account is pending approval by our admin team.
 • /vehicle <number> - Vehicle details
 • /ff <uid> - Free Fire stats
 • /terabox <link> - TeraBox downloader
+
+📱 **Social Media Video Downloaders:**
+• /snap <url> - Snapchat video downloader
+• /insta <url> - Instagram video downloader
+• /pin <url> - Pinterest video downloader
+• /fb <url> - Facebook video downloader
 
 📊 **System Commands:**
 • /myip - Your IP information
@@ -511,44 +530,6 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
 });
 
 // OSINT Commands
-bot.command('imei', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
-  }
-
-  const imei = ctx.match;
-  if (!imei) {
-    await sendFormattedMessage(ctx, '📱 *Usage: /imei <IMEI number>*\n\nExample: /imei 353010111111110');
-    return;
-  }
-
-  await sendFormattedMessage(ctx, '🔍 *Analyzing IMEI number...*');
-
-  try {
-    const result = await getImeiInfo(imei.toString());
-    
-    if (result.success && result.data) {
-      const response = `📱 **IMEI Analysis Results** 📱
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 *IMEI information for educational purposes only*`;
-
-      await sendFormattedMessage(ctx, response);
-      user.totalQueries++;
-    } else {
-      await sendFormattedMessage(ctx, '❌ Failed to analyze IMEI number. Please check the number and try again.');
-    }
-  } catch (error) {
-    console.error('Error in imei command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while analyzing IMEI number.');
-  }
-});
-
 bot.command('ip', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
@@ -617,44 +598,6 @@ bot.command('email', async (ctx) => {
   } catch (error) {
     console.error('Error in email command:', error);
     await sendFormattedMessage(ctx, '❌ An error occurred while validating email address.');
-  }
-});
-
-bot.command('domain', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
-  }
-
-  const domain = ctx.match;
-  if (!domain) {
-    await sendFormattedMessage(ctx, '🌐 *Usage: /domain <domain name>*\n\nExample: /domain example.com');
-    return;
-  }
-
-  await sendFormattedMessage(ctx, '🔍 *Analyzing domain information...*');
-
-  try {
-    const result = await getDomainInfo(domain.toString());
-    
-    if (result.success && result.data) {
-      const response = `🌐 **Domain Analysis Results** 🌐
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 *Domain information for educational purposes only*`;
-
-      await sendFormattedMessage(ctx, response);
-      user.totalQueries++;
-    } else {
-      await sendFormattedMessage(ctx, '❌ Failed to analyze domain. Please check the domain name and try again.');
-    }
-  } catch (error) {
-    console.error('Error in domain command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while analyzing domain information.');
   }
 });
 
@@ -913,6 +856,159 @@ bot.command('terabox', async (ctx) => {
   user.totalQueries++;
 });
 
+// Social Media Video Downloader Commands
+bot.command('snap', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    await sendFormattedMessage(ctx, '🦼 *Usage: /snap <Snapchat video URL>*\n\nExample: /snap https://snapchat.com/t/H2D8zTxt');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🦼 *Downloading Snapchat video...*');
+
+  try {
+    const result = await downloadSnapchat(videoUrl.toString());
+    
+    if (result.success && result.data) {
+      const response = `🦼 **Snapchat Video Download** 🦼
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 *Snapchat video download for educational purposes only*`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      await sendFormattedMessage(ctx, '❌ Failed to download Snapchat video. Please check the URL and try again.');
+    }
+  } catch (error) {
+    console.error('Error in snap command:', error);
+    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Snapchat video.');
+  }
+});
+
+bot.command('insta', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    await sendFormattedMessage(ctx, '💎 *Usage: /insta <Instagram video URL>*\n\nExample: /insta https://www.instagram.com/reel/DSSvFDgjU3s/?igsh=dGQ0YW10Y2Rwb293');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '💎 *Downloading Instagram video...*');
+
+  try {
+    const result = await downloadInstagram(videoUrl.toString());
+    
+    if (result.success && result.data) {
+      const response = `💎 **Instagram Video Download** 💎
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 *Instagram video download for educational purposes only*`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      await sendFormattedMessage(ctx, '❌ Failed to download Instagram video. Please check the URL and try again.');
+    }
+  } catch (error) {
+    console.error('Error in insta command:', error);
+    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Instagram video.');
+  }
+});
+
+bot.command('pin', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❤️ *Usage: /pin <Pinterest video URL>*\n\nExample: /pin https://pin.it/4gsJMxtt1');
+    return;
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    await sendFormattedMessage(ctx, '❤️ *Usage: /pin <Pinterest video URL>*\n\nExample: /pin https://pin.it/4gsJMxtt1');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '❤️ *Downloading Pinterest video...*');
+
+  try {
+    const result = await downloadPinterest(videoUrl.toString());
+    
+    if (result.success && result.data) {
+      const response = `❤️ **Pinterest Video Download** ❤️
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 *Pinterest video download for educational purposes only*`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      await sendFormattedMessage(ctx, '❌ Failed to download Pinterest video. Please check the URL and try again.');
+    }
+  } catch (error) {
+    console.error('Error in pin command:', error);
+    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Pinterest video.');
+  }
+});
+
+bot.command('fb', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❤️ *Usage: /fb <Facebook video URL>*\n\nExample: /fb https://www.facebook.com/reel/1157396829623170/');
+    return;
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    await sendFormattedMessage(ctx, '❤️ *Usage: /fb <Facebook video URL>*\n\nExample: /fb https://www.facebook.com/reel/1157396829623170/');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '❤️ *Downloading Facebook video...*');
+
+  try {
+    const result = await downloadFacebook(videoUrl.toString());
+    
+    if (result.success && result.data) {
+      const response = `❤️ **Facebook Video Download** ❤️
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 *Facebook video download for educational purposes only*`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      await sendFormattedMessage(ctx, '❌ Failed to download Facebook video. Please check the URL and try again.');
+    }
+  } catch (error) {
+    console.error('Error in fb command:', error);
+    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Facebook video.');
+  }
+});
+
 bot.command('myip', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
@@ -1092,7 +1188,6 @@ bot.command('help', async (ctx) => {
 🔍 **OSINT Lookup Commands:**
 
 📱 **Device & Network:**
-• /imei <number> - IMEI number analysis and device info
 • /ip <address> - IP geolocation and intelligence
 • /bin <number> - Bank Identification Number lookup
 
@@ -1107,8 +1202,11 @@ bot.command('help', async (ctx) => {
 • /ff <uid> - Free Fire player statistics
 • /terabox <link> - TeraBox file downloader
 
-🌐 **Domain & Network:**
-• /domain <domain> - DNS records and domain info
+📱 **Social Media Video Downloaders:**
+• /snap <url> - Snapchat video downloader
+• /insta <url> - Instagram video downloader
+• /pin <url> - Pinterest video downloader
+• /fb <url> - Facebook video downloader
 
 📊 **System Commands:**
 • /myip - Get your current IP information
@@ -1125,11 +1223,14 @@ bot.command('help', async (ctx) => {
 • 🎯 Higher rate limits
 
 📝 **Usage Examples:**
-• /imei 353010111111110
 • /ip 8.8.8.8
 • /email user@example.com
 • /paknum 03005854962
 • /ig instagram
+• /snap https://snapchat.com/t/H2D8zTxt
+• /insta https://www.instagram.com/reel/DSSvFDgjU3s/
+• /pin https://pin.it/4gsJMxtt1
+• /fb https://www.facebook.com/reel/1157396829623170/
 
 ⚠️ **Important Notes:**
 • Each query consumes 1 credit
@@ -2169,18 +2270,38 @@ bot.command('backup', async (ctx) => {
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /imei 353010111111110\n• /ip 8.8.8.8\n• /email test@example.com\n• /domain google.com\n• /myip\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /myip\n• /admin (for admin)');
 });
 
-// Error handling
+// Error handling with conflict resolution
 bot.catch((err) => {
   const ctx = err.ctx;
   console.error(`Error while handling update ${ctx.update.update_id}:`);
   const e = err.error;
+  
+  // Handle 409 Conflict error specifically
+  if (e.code === 409) {
+    console.log('⚠️ Bot conflict detected - stopping current instance...');
+    process.exit(0);
+  }
+  
   console.error('Error:', e);
 });
 
-// Start bot
+// Graceful shutdown handling
+process.on('SIGINT', () => {
+  console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+  bot.stop();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+  bot.stop();
+  process.exit(0);
+});
+
+// Start bot with conflict detection
 console.log('🚀 Starting Premium OSINT Bot with Complete Admin Panel & Registration Management...');
 console.log(`🤖 Bot Username: @OsintShit_Bot`);
 console.log(`👑 Admin ID: ${adminId}`);
@@ -2191,4 +2312,10 @@ bot.start().then(() => {
   console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
+  
+  // If it's a conflict error, exit gracefully
+  if (error.code === 409) {
+    console.log('⚠️ Another bot instance is running. Exiting to prevent conflicts...');
+    process.exit(0);
+  }
 });
