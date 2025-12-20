@@ -208,17 +208,49 @@ async function downloadFacebook(videoUrl) {
   }
 }
 
+async function downloadTeraBox(videoUrl) {
+  try {
+    const apiKey = 'RushVx'; // Your API key
+    const apiUrl = `https://teradl.tiiny.io/?key=${apiKey}&link=${encodeURIComponent(videoUrl)}`;
+    const response = await axios.get(apiUrl, { timeout: 60000 }); // Increased timeout for large files
+    return { success: true, data: response.data };
+  } catch (error) {
+    console.error('TeraBox API Error:', error.response?.data || error.message);
+    return { success: false, error: 'Failed to fetch download link from TeraBox API.' };
+  }
+}
+
 // ===== VIDEO SENDER HELPER =====
 async function sendVideoDirect(ctx, apiData, caption) {
   try {
-    const videoUrl =
-      apiData?.data?.result?.video ||
-      apiData?.data?.video ||
-      apiData?.data?.url ||
-      apiData?.data?.result?.url_download;
+    // First, try to get the URL from the top level of the response
+    // This is common for simple APIs like the new TeraBox one
+    let videoUrl = apiData?.data?.url || apiData?.data?.download_url;
+
+    // If not found, try deeper nested paths (for other services)
+    if (!videoUrl) {
+      videoUrl =
+        apiData?.data?.result?.video ||
+        apiData?.data?.video ||
+        apiData?.data?.result?.url_download ||
+        apiData?.data?.medias?.[0]?.url ||
+        apiData?.data?.medias?.[0]?.download ||
+        apiData?.data?.links?.download ||
+        apiData?.data?.result?.links?.download;
+    }
 
     if (!videoUrl) {
-      return ctx.reply('❌ Failed to get video link.');
+      // As a last resort, search the entire response for a video file extension
+      const dataStr = JSON.stringify(apiData);
+      const urlMatch = dataStr.match(/https?:\/\/[^\s"']+\.(mp4|mov|avi|webm|mkv)(\?[^"']*)?/gi);
+      if (urlMatch && urlMatch.length > 0) {
+        videoUrl = urlMatch[0];
+      }
+    }
+
+    if (!videoUrl) {
+      console.error('Could not extract video URL. API Response:', JSON.stringify(apiData, null, 2));
+      return ctx.reply('❌ Failed to get a valid video link from the API response.');
     }
 
     try {
@@ -227,11 +259,12 @@ async function sendVideoDirect(ctx, apiData, caption) {
         supports_streaming: true
       });
     } catch (err) {
+      console.error('Failed to send video directly, sending link instead. Error:', err.message);
       await ctx.reply(`${caption}\n\n⬇️ Download Link:\n${videoUrl}`);
     }
   } catch (error) {
-    console.error(error);
-    await ctx.reply('❌ Error while sending video.');
+    console.error('Error in sendVideoDirect:', error);
+    await ctx.reply('❌ An unexpected error occurred while sending the video.');
   }
 }
 
@@ -1030,40 +1063,6 @@ bot.command('ff', async (ctx) => {
   }
 });
 
-bot.command('terabox', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
-  }
-
-  // Check credits
-  if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
-    return;
-  }
-
-  const link = ctx.match;
-  if (!link) {
-    await sendFormattedMessage(ctx, '📁 *Usage: /terabox <TeraBox link>*\n\nExample: /terabox https://terabox.com/s/...');
-    return;
-  }
-
-  await sendFormattedMessage(ctx, '🔍 *Processing TeraBox link...*');
-
-  const response = `📁 **TeraBox Downloader** 📁
-
-⚠️ *TeraBox integration coming soon!*
-
-🔗 *Link received:* ${link}
-
-💡 *This feature is currently under development*
-• 1 credit deducted from your balance`;
-
-  await sendFormattedMessage(ctx, response);
-  user.totalQueries++;
-});
-
 // Social Media Video Downloader Commands
 bot.command('snap', async (ctx) => {
   const user = getOrCreateUser(ctx);
@@ -1177,6 +1176,39 @@ bot.command('fb', async (ctx) => {
     ctx,
     result,
     '❤️ Facebook video downloaded successfully'
+  );
+
+  user.totalQueries++;
+});
+
+bot.command('terabox', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    return sendFormattedMessage(ctx, '📁 *Usage: /terabox <TeraBox video URL>*');
+  }
+
+  await sendFormattedMessage(ctx, '📁 *Downloading TeraBox video...*');
+
+  const result = await downloadTeraBox(videoUrl.toString());
+
+  if (!result.success) {
+    user.credits += 1; // Refund credit on failure
+    return sendFormattedMessage(ctx, '❌ Failed to download TeraBox video.');
+  }
+
+  await sendVideoDirect(
+    ctx,
+    result,
+    '📁 TeraBox video downloaded successfully'
   );
 
   user.totalQueries++;
