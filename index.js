@@ -176,6 +176,23 @@ async function downloadSnapchat(videoUrl) {
   try {
     const apiUrl = `http://15.204.130.9:5150/snap?video=${encodeURIComponent(videoUrl)}`;
     const response = await axios.get(apiUrl, { timeout: 30000 });
+    
+    // Check if the response contains a m3u8 playlist
+    if (typeof response.data === 'string' && response.data.includes('.m3u8')) {
+      // Extract the actual video URL from the m3u8 playlist
+      const m3u8Match = response.data.match(/https:\/\/[^"'\s]+\.m3u8[^"'\s]*/);
+      if (m3u8Match) {
+        // Return the m3u8 URL for further processing
+        return { 
+          success: true, 
+          data: { 
+            video: m3u8Match[0],
+            isM3U8: true // Flag to indicate this is a playlist
+          } 
+        };
+      }
+    }
+    
     return { success: true, data: response.data };
   } catch (error) {
     return { success: false, error: 'Failed to download Snapchat video' };
@@ -331,11 +348,16 @@ async function handleTeraBox(ctx, url) {
       return sendFormattedMessage(ctx, '❌ No videos found in TeraBox link.');
     }
     
-    // Send each video
+    // Send each video in a separate message with a delay to avoid rate limiting
     for (let i = 0; i < videos.length; i++) {
       const videoUrl = videos[i].url || videos[i].download_url || videos[i];
       
       if (!videoUrl) continue;
+      
+      // Add a small delay between messages to avoid rate limiting
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
       
       await sendVideoSmart(
         ctx,
@@ -368,7 +390,7 @@ async function handleSingleVideo(ctx, url, platform) {
     }
     
     // Extract video URL from response
-    const videoUrl =
+    let videoUrl =
       result.data?.result?.video ||
       result.data?.video ||
       result.data?.url ||
@@ -378,6 +400,12 @@ async function handleSingleVideo(ctx, url, platform) {
       result.data?.links?.download ||
       result.data?.result?.links?.download ||
       result.data?.response?.videos?.[0]?.url;
+    
+    // Special handling for m3u8 files (Snapchat)
+    if (result.data?.isM3U8 && videoUrl) {
+      await sendFormattedMessage(ctx, `🎬 ${platform.charAt(0).toUpperCase() + platform.slice(1)} Video\n\n⬇️ Direct Download Link:\n${videoUrl}\n\n⚠️ Note: This is a streaming playlist. You may need to use a video downloader that supports m3u8 files.`);
+      return true;
+    }
     
     if (!videoUrl) {
       console.error(`Could not extract video URL for ${platform}. Full API Response:`, JSON.stringify(result, null, 2));
