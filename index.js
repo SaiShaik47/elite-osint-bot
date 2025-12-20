@@ -220,82 +220,168 @@ async function downloadTeraBox(videoUrl) {
   }
 }
 
-// ===== ENHANCED VIDEO SENDER HELPER =====
-async function sendVideoDirect(ctx, apiData, commandName) {
+// ===== HELPER FUNCTIONS =====
+
+// Auto-detect platform from URL
+function detectPlatform(url) {
+  if (/instagram\.com/.test(url)) return 'insta';
+  if (/facebook\.com|fb\.watch/.test(url)) return 'fb';
+  if (/snapchat\.com/.test(url)) return 'snap';
+  if (/pinterest\.com/.test(url)) return 'pin';
+  if (/terabox|teraboxshare|teradl/.test(url)) return 'terabox';
+  return 'unknown';
+}
+
+// Check if video can be sent directly to Telegram
+async function canSendAsVideo(url) {
   try {
-    // --- Handle TeraBox API (returns an array of videos) ---
-    if (commandName === 'terabox' && apiData?.data && Array.isArray(apiData.data)) {
-      if (apiData.data.length === 0) {
-        return ctx.reply('❌ No videos found in the TeraBox response.');
-      }
-      for (let i = 0; i < apiData.data.length; i++) {
-        const videoItem = apiData.data[i];
-        const videoUrl = videoItem?.url || videoItem?.download_url;
+    const head = await axios.head(url, { timeout: 10000 });
+    const size = Number(head.headers['content-length'] || 0);
+    const type = head.headers['content-type'] || '';
 
-        if (!videoUrl) {
-          console.warn(`TeraBox: No URL found for item ${i + 1}. Item:`, videoItem);
-          continue;
-        }
-        const itemCaption = `📁 TeraBox Video (Part ${i + 1}/${apiData.data.length})`;
-        try {
-          await ctx.replyWithVideo(videoUrl, { caption: itemCaption, supports_streaming: true });
-        } catch (err) {
-          console.error(`TeraBox: Failed to send video part ${i + 1}, sending link. Error:`, err.message);
-          await ctx.reply(`${itemCaption}\n\n⬇️ Download Link:\n${videoUrl}`);
-        }
-      }
-      return;
-    }
+    if (!type.includes('video')) return false;
+    if (size > 49 * 1024 * 1024) return false; // 49MB safe limit
 
-    // --- Handle Other APIs (Snapchat, Facebook, Instagram, Pinterest) ---
-    let videoUrl = null;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-    // First, try to get the URL from the top level of the response
-    if (apiData?.data) {
-      videoUrl = apiData.data.url || apiData.data.download_url;
-    }
+// Get video file information
+async function getVideoInfo(url) {
+  try {
+    const head = await axios.head(url, { timeout: 10000 });
+    const size = Number(head.headers['content-length'] || 0);
+    const type = head.headers['content-type'] || '';
+    
+    return {
+      size: size,
+      sizeMB: (size / (1024 * 1024)).toFixed(2),
+      type: type,
+      canSend: size <= 49 * 1024 * 1024 && type.includes('video')
+    };
+  } catch (error) {
+    return {
+      size: 0,
+      sizeMB: 'Unknown',
+      type: 'Unknown',
+      canSend: false
+    };
+  }
+}
 
-    // If not found, try deeper nested paths
-    if (!videoUrl && apiData?.data) {
-      videoUrl =
-        apiData.data.result?.video ||
-        apiData.data.video ||
-        apiData.data.result?.url_download ||
-        apiData.data.medias?.[0]?.url ||
-        apiData.data.medias?.[0]?.download ||
-        apiData.data.links?.download ||
-        apiData.data.result?.links?.download ||
-        apiData.data.response?.videos?.[0]?.url; // A common pattern for some APIs
-    }
-
-    // If still no URL, try a regex search as a last resort
-    if (!videoUrl) {
-      const dataStr = JSON.stringify(apiData);
-      const urlMatch = dataStr.match(/https?:\/\/[^\s"']+\.(mp4|mov|avi|webm|mkv)(\?[^"']*)?/gi);
-      if (urlMatch && urlMatch.length > 0) {
-        videoUrl = urlMatch[0];
-      }
-    }
-
-    if (!videoUrl) {
-      // --- THIS IS THE CRITICAL DEBUGGING PART ---
-      console.error(`❌ Could not extract video URL for /${commandName}. Full API Response:`, JSON.stringify(apiData, null, 2));
-      return ctx.reply(`❌ Failed to get a valid video link from the /${commandName} API response. The bot owner has been notified.`);
-    }
-
-    // We found a URL, now try to send it
-    try {
+// Smart video sender with size detection
+async function sendVideoSmart(ctx, videoUrl, caption) {
+  try {
+    // Get video information first
+    const videoInfo = await getVideoInfo(videoUrl);
+    
+    // Create caption with video info
+    const fullCaption = `${caption}\n\n📊 Size: ${videoInfo.sizeMB}MB | Type: ${videoInfo.type}`;
+    
+    if (videoInfo.canSend) {
       await ctx.replyWithVideo(videoUrl, {
-        caption: `✅ ${commandName.charAt(0).toUpperCase() + commandName.slice(1)} video downloaded successfully`,
+        caption: fullCaption,
         supports_streaming: true
       });
-    } catch (err) {
-      console.error(`Failed to send /${commandName} video directly, sending link instead. Error:`, err.message);
-      await ctx.reply(`⬇️ ${commandName.charAt(0).toUpperCase() + commandName.slice(1)} Video Download Link:\n\n${videoUrl}`);
+    } else {
+      await ctx.reply(
+        `${fullCaption}\n\n⬇️ Download Link:\n${videoUrl}`
+      );
     }
+  } catch (err) {
+    console.error(err);
+    await ctx.reply(
+      `${caption}\n\n⬇️ Download Link:\n${videoUrl}`
+    );
+  }
+}
+
+// Handle TeraBox multi-video downloads
+async function handleTeraBox(ctx, url) {
+  try {
+    const result = await downloadTeraBox(url);
+    
+    if (!result.success) {
+      return sendFormattedMessage(ctx, '❌ Failed to process TeraBox link.');
+    }
+    
+    // Handle different response formats
+    let videos = [];
+    
+    if (Array.isArray(result.data)) {
+      videos = result.data;
+    } else if (result.data.videos && Array.isArray(result.data.videos)) {
+      videos = result.data.videos;
+    } else if (result.data.data && Array.isArray(result.data.data)) {
+      videos = result.data.data;
+    } else {
+      return sendFormattedMessage(ctx, '❌ No videos found in TeraBox response.');
+    }
+    
+    if (videos.length === 0) {
+      return sendFormattedMessage(ctx, '❌ No videos found in TeraBox link.');
+    }
+    
+    // Send each video
+    for (let i = 0; i < videos.length; i++) {
+      const videoUrl = videos[i].url || videos[i].download_url || videos[i];
+      
+      if (!videoUrl) continue;
+      
+      await sendVideoSmart(
+        ctx,
+        videoUrl,
+        `📦 TeraBox Video ${i + 1}/${videos.length}`
+      );
+    }
+    
+    return true;
   } catch (error) {
-    console.error(`Error in sendVideoDirect for /${commandName}:`, error);
-    await ctx.reply('❌ An unexpected error occurred while sending the video.');
+    console.error('Error handling TeraBox:', error);
+    return sendFormattedMessage(ctx, '❌ Error processing TeraBox link.');
+  }
+}
+
+// Handle single video downloads
+async function handleSingleVideo(ctx, url, platform) {
+  try {
+    let result;
+    
+    // Call the appropriate download function
+    if (platform === 'insta') result = await downloadInstagram(url);
+    else if (platform === 'fb') result = await downloadFacebook(url);
+    else if (platform === 'snap') result = await downloadSnapchat(url);
+    else if (platform === 'pin') result = await downloadPinterest(url);
+    else return sendFormattedMessage(ctx, '❌ Unsupported platform.');
+    
+    if (!result.success) {
+      return sendFormattedMessage(ctx, `❌ Failed to download ${platform} video.`);
+    }
+    
+    // Extract video URL from response
+    const videoUrl =
+      result.data?.result?.video ||
+      result.data?.video ||
+      result.data?.url ||
+      result.data?.download_url ||
+      result.data?.medias?.[0]?.url ||
+      result.data?.medias?.[0]?.download ||
+      result.data?.links?.download ||
+      result.data?.result?.links?.download ||
+      result.data?.response?.videos?.[0]?.url;
+    
+    if (!videoUrl) {
+      console.error(`Could not extract video URL for ${platform}. Full API Response:`, JSON.stringify(result, null, 2));
+      return sendFormattedMessage(ctx, `❌ Failed to get video URL from ${platform} API.`);
+    }
+    
+    await sendVideoSmart(ctx, videoUrl, `🎬 ${platform.charAt(0).toUpperCase() + platform.slice(1)} Video`);
+    return true;
+  } catch (error) {
+    console.error(`Error handling ${platform}:`, error);
+    return sendFormattedMessage(ctx, `❌ Error processing ${platform} video.`);
   }
 }
 
@@ -451,6 +537,7 @@ Your account is pending approval by our admin team.
 • /ff <uid> - Free Fire stats
 
 📱 **Social Media Video Downloaders:**
+• /dl <url> - Universal video downloader (auto-detects platform)
 • /snap <url> - Snapchat video downloader
 • /insta <url> - Instagram video downloader
 • /pin <url> - Pinterest video downloader
@@ -480,6 +567,206 @@ Your account is pending approval by our admin team.
 🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
 
   await sendFormattedMessage(ctx, welcomeMessage);
+});
+
+// Universal video downloader command
+bot.command('dl', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const url = ctx.match;
+  if (!url) {
+    return sendFormattedMessage(ctx, '❌ Usage: /dl <video link>');
+  }
+
+  const platform = detectPlatform(url);
+  if (platform === 'unknown') {
+    return sendFormattedMessage(ctx, '❌ Unsupported platform. Please use a link from Instagram, Facebook, Snapchat, Pinterest, or TeraBox.');
+  }
+
+  await sendFormattedMessage(ctx, `⏳ Processing ${platform} video...`);
+
+  try {
+    let success;
+    
+    if (platform === 'terabox') {
+      success = await handleTeraBox(ctx, url);
+    } else {
+      success = await handleSingleVideo(ctx, url, platform);
+    }
+    
+    if (success) {
+      user.totalQueries++;
+    } else {
+      user.credits += 1; // Refund credit on failure
+    }
+  } catch (error) {
+    console.error('Error in dl command:', error);
+    user.credits += 1; // Refund credit on error
+    sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
+  }
+});
+
+// Keep individual commands for backward compatibility
+bot.command('snap', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    return sendFormattedMessage(ctx, '🦼 *Usage: /snap <Snapchat video URL>*');
+  }
+
+  await sendFormattedMessage(ctx, '🦼 *Downloading Snapchat video...*');
+
+  try {
+    const success = await handleSingleVideo(ctx, videoUrl, 'snap');
+    if (success) {
+      user.totalQueries++;
+    } else {
+      user.credits += 1; // Refund credit on failure
+    }
+  } catch (error) {
+    console.error('Error in snap command:', error);
+    user.credits += 1; // Refund credit on error
+    sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
+  }
+});
+
+bot.command('insta', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    return sendFormattedMessage(ctx, '💎 *Usage: /insta <Instagram video URL>*');
+  }
+
+  await sendFormattedMessage(ctx, '💎 *Downloading Instagram video...*');
+
+  try {
+    const success = await handleSingleVideo(ctx, videoUrl, 'insta');
+    if (success) {
+      user.totalQueries++;
+    } else {
+      user.credits += 1; // Refund credit on failure
+    }
+  } catch (error) {
+    console.error('Error in insta command:', error);
+    user.credits += 1; // Refund credit on error
+    sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
+  }
+});
+
+bot.command('pin', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    return sendFormattedMessage(ctx, '❤️ *Usage: /pin <Pinterest video URL>*');
+  }
+
+  await sendFormattedMessage(ctx, '❤️ *Downloading Pinterest video...*');
+
+  try {
+    const success = await handleSingleVideo(ctx, videoUrl, 'pin');
+    if (success) {
+      user.totalQueries++;
+    } else {
+      user.credits += 1; // Refund credit on failure
+    }
+  } catch (error) {
+    console.error('Error in pin command:', error);
+    user.credits += 1; // Refund credit on error
+    sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
+  }
+});
+
+bot.command('fb', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    return sendFormattedMessage(ctx, '❤️ *Usage: /fb <Facebook video URL>*');
+  }
+
+  await sendFormattedMessage(ctx, '❤️ *Downloading Facebook video...*');
+
+  try {
+    const success = await handleSingleVideo(ctx, videoUrl, 'fb');
+    if (success) {
+      user.totalQueries++;
+    } else {
+      user.credits += 1; // Refund credit on failure
+    }
+  } catch (error) {
+    console.error('Error in fb command:', error);
+    user.credits += 1; // Refund credit on error
+    sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
+  }
+});
+
+bot.command('terabox', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    return sendFormattedMessage(ctx, '📁 *Usage: /terabox <TeraBox video URL>*');
+  }
+
+  await sendFormattedMessage(ctx, '📁 *Processing TeraBox link...*');
+
+  try {
+    const success = await handleTeraBox(ctx, videoUrl);
+    if (success) {
+      user.totalQueries++;
+    } else {
+      user.credits += 1; // Refund credit on failure
+    }
+  } catch (error) {
+    console.error('Error in terabox command:', error);
+    user.credits += 1; // Refund credit on error
+    sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
+  }
 });
 
 // Registration command
@@ -1094,158 +1381,6 @@ bot.command('ff', async (ctx) => {
   }
 });
 
-// Social Media Video Downloader Commands
-bot.command('snap', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
-  }
-
-  if (!deductCredits(user)) {
-    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
-  }
-
-  const videoUrl = ctx.match;
-  if (!videoUrl) {
-    return sendFormattedMessage(ctx, '🦼 *Usage: /snap <Snapchat video URL>*');
-  }
-
-  await sendFormattedMessage(ctx, '🦼 *Downloading Snapchat video...*');
-
-  const result = await downloadSnapchat(videoUrl.toString());
-
-  if (!result.success) {
-    user.credits += 1;
-    return sendFormattedMessage(ctx, '❌ Failed to download Snapchat video.');
-  }
-
-  await sendVideoDirect(
-    ctx,
-    result,
-    'snap' // Pass the command name
-  );
-
-  user.totalQueries++;
-});
-
-bot.command('insta', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
-  }
-
-  const videoUrl = ctx.match;
-  if (!videoUrl) {
-    return sendFormattedMessage(ctx, '💎 *Usage: /insta <Instagram video URL>*');
-  }
-
-  await sendFormattedMessage(ctx, '💎 *Downloading Instagram video...*');
-
-  const result = await downloadInstagram(videoUrl.toString());
-
-  if (!result.success) {
-    return sendFormattedMessage(ctx, '❌ Failed to download Instagram video.');
-  }
-
-  await sendVideoDirect(
-    ctx,
-    result,
-    'insta' // Pass the command name
-  );
-
-  user.totalQueries++;
-});
-
-bot.command('pin', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
-  }
-
-  const videoUrl = ctx.match;
-  if (!videoUrl) {
-    return sendFormattedMessage(ctx, '❤️ *Usage: /pin <Pinterest video URL>*');
-  }
-
-  await sendFormattedMessage(ctx, '❤️ *Downloading Pinterest video...*');
-
-  const result = await downloadPinterest(videoUrl.toString());
-
-  if (!result.success) {
-    return sendFormattedMessage(ctx, '❌ Failed to download Pinterest video.');
-  }
-
-  await sendVideoDirect(
-    ctx,
-    result,
-    'pin' // Pass the command name
-  );
-
-  user.totalQueries++;
-});
-
-bot.command('fb', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
-  }
-
-  const videoUrl = ctx.match;
-  if (!videoUrl) {
-    return sendFormattedMessage(ctx, '❤️ *Usage: /fb <Facebook video URL>*');
-  }
-
-  await sendFormattedMessage(ctx, '❤️ *Downloading Facebook video...*');
-
-  const result = await downloadFacebook(videoUrl.toString());
-
-  if (!result.success) {
-    return sendFormattedMessage(ctx, '❌ Failed to download Facebook video.');
-  }
-
-  await sendVideoDirect(
-    ctx,
-    result,
-    'fb' // Pass the command name
-  );
-
-  user.totalQueries++;
-});
-
-bot.command('terabox', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
-  }
-
-  if (!deductCredits(user)) {
-    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
-  }
-
-  const videoUrl = ctx.match;
-  if (!videoUrl) {
-    return sendFormattedMessage(ctx, '📁 *Usage: /terabox <TeraBox video URL>*');
-  }
-
-  await sendFormattedMessage(ctx, '📁 *Processing TeraBox link...*');
-
-  const result = await downloadTeraBox(videoUrl.toString());
-
-  if (!result.success) {
-    user.credits += 1; // Refund credit on failure
-    return sendFormattedMessage(ctx, '❌ Failed to process TeraBox link.');
-  }
-
-  // The TeraBox API returns an array of video objects directly in result.data
-  await sendVideoDirect(
-    ctx,
-    { data: result.data }, // Pass the array of videos
-    'terabox' // Pass the command name
-  );
-
-  user.totalQueries++;
-});
-
 bot.command('myip', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
@@ -1440,6 +1575,7 @@ bot.command('help', async (ctx) => {
 • /ff <uid> - Free Fire player statistics
 
 📱 **Social Media Video Downloaders:**
+• /dl <url> - Universal video downloader (auto-detects platform)
 • /snap <url> - Snapchat video downloader
 • /insta <url> - Instagram video downloader
 • /pin <url> - Pinterest video downloader
@@ -1469,8 +1605,8 @@ bot.command('help', async (ctx) => {
 • /basicnum 919087654321
 • /paknum 03005854962
 • /ig instagram
+• /dl https://www.instagram.com/reel/DSSvFDgjU3s/
 • /snap https://snapchat.com/t/H2D8zTxt
-• /insta https://www.instagram.com/reel/DSSvFDgjU3s/
 • /pin https://pin.it/4gsJMxtt1
 • /fb https://www.facebook.com/reel/1157396829623170/
 
@@ -1479,6 +1615,7 @@ bot.command('help', async (ctx) => {
 • Results are for educational purposes only
 • Use responsibly and legally
 • Respect privacy laws
+• Videos larger than 50MB will be sent as download links
 
 🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
 
@@ -2677,7 +2814,7 @@ bot.command('sync', async (ctx) => {
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
 });
 
 // Error handling with conflict resolution
@@ -2717,6 +2854,7 @@ console.log('📡 Starting polling...');
 bot.start().then(() => {
   console.log('✅ Bot is now running and polling for updates!');
   console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
+  console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
