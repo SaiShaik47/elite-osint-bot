@@ -21,6 +21,10 @@ const users = new Map();
 const registrationRequests = new Map();
 const adminId = process.env.ADMIN_USER_ID;
 
+// Maintenance mode flag (stored in memory, will reset on bot restart)
+let maintenanceMode = false;
+let maintenanceMessage = "Bot is currently under maintenance. Please try again later.";
+
 // Validate admin ID
 if (!adminId) {
   console.error('❌ ADMIN_USER_ID environment variable is not set!');
@@ -229,6 +233,9 @@ function detectPlatform(url) {
   if (/snapchat\.com/.test(url)) return 'snap';
   if (/pinterest\.com/.test(url)) return 'pin';
   if (/terabox|teraboxshare|teradl/.test(url)) return 'terabox';
+  if (/youtube\.com|youtu\.be/.test(url)) return 'youtube';
+  if (/twitter\.com|x\.com/.test(url)) return 'twitter';
+  if (/tiktok\.com/.test(url)) return 'tiktok';
   return 'unknown';
 }
 
@@ -495,6 +502,22 @@ async function notifyAdmin(message, keyboard) {
     console.error('Failed to notify admin:', error);
   }
 }
+
+// Middleware to check maintenance mode
+bot.use((ctx, next) => {
+  // Skip maintenance check for admin users
+  if (isAdmin(ctx.from?.id.toString())) {
+    return next();
+  }
+  
+  // If in maintenance mode, send maintenance message
+  if (maintenanceMode) {
+    return ctx.reply(maintenanceMessage);
+  }
+  
+  // Otherwise, continue to next middleware
+  return next();
+});
 
 // Start command with registration management
 bot.command('start', async (ctx) => {
@@ -1674,7 +1697,7 @@ bot.command('admin', async (ctx) => {
 • /announce <title>|<message> - 🎭 Rich announcement
 • /reset_daily - 🔄 Reset daily statistics
 • /lucky - 🍀 Random user bonus
-• /maintenance - ⚙️ Toggle maintenance mode
+• /maintenance <on|off|message> - ⚙️ Toggle maintenance mode
 
 🔥 🎯 **Advanced Tools:**
 • /masspremium - 👑 Mass premium upgrade
@@ -1687,6 +1710,7 @@ bot.command('admin', async (ctx) => {
 • ✅ Approved Users: ${approvedUsers}
 • 💎 Premium Users: ${premiumUsers}
 • ⏳ Pending Registrations: ${pendingCount}
+• 🔧 Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
 
 ⚡ 🌟 **Unlimited Power • Unlimited Possibilities** 🌟 ⚡
 
@@ -2349,6 +2373,7 @@ bot.command('adminstats', async (ctx) => {
 🔧 **System Health:**
 • Bot Status: ✅ Online
 • Database: ✅ Connected
+• Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
 • Last Update: ${new Date().toLocaleString()}`;
 
   await sendFormattedMessage(ctx, statsMessage);
@@ -2529,6 +2554,64 @@ bot.command('announce', async (ctx) => {
   await sendFormattedMessage(ctx, resultMessage);
 });
 
+// Real maintenance mode command
+bot.command('maintenance', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const args = ctx.match?.toString().split(' ');
+  if (!args || args.length < 1) {
+    await sendFormattedMessage(ctx, '⚙️ *Usage: /maintenance <on|off|message>*\n\nExamples:\n• /maintenance on "Bot under maintenance"\n• /maintenance off');
+    return;
+  }
+
+  const action = args[0].toLowerCase();
+  
+  if (action === 'on') {
+    maintenanceMode = true;
+    maintenanceMessage = args.slice(1).join(' ') || "Bot is currently under maintenance. Please try again later.";
+    
+    await sendFormattedMessage(ctx, `⚙️ **Maintenance Mode Enabled** ⚙️
+
+✅ **Settings Updated:**
+• Status: Maintenance ON
+• Message: "${maintenanceMessage}"
+• Admin: @${ctx.from?.username}
+
+🔧 All non-admin users will now see the maintenance message when using the bot.`);
+    
+    // Notify all users about maintenance
+    const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
+    for (const user of approvedUsers) {
+      try {
+        if (!isAdmin(user.telegramId)) {
+          await notifyUser(user.telegramId, maintenanceMessage);
+        }
+      } catch (error) {
+        console.error(`Failed to notify user ${user.telegramId} about maintenance:`, error);
+      }
+    }
+  } 
+  else if (action === 'off') {
+    maintenanceMode = false;
+    
+    await sendFormattedMessage(ctx, `⚙️ **Maintenance Mode Disabled** ⚙️
+
+✅ **Settings Updated:**
+• Status: Maintenance OFF
+• Admin: @${ctx.from?.username}
+
+🔧 All users can now use the bot normally.`);
+  } 
+  else {
+    await sendFormattedMessage(ctx, '❌ Invalid action. Use "on" or "off".');
+  }
+});
+
 bot.command('lucky', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
@@ -2603,30 +2686,6 @@ bot.command('reset_daily', async (ctx) => {
 • Admin: @${ctx.from?.username}
 
 📊 *All daily query counts have been reset to zero*`;
-
-  await sendFormattedMessage(ctx, message);
-});
-
-bot.command('maintenance', async (ctx) => {
-  const telegramId = ctx.from?.id.toString();
-  
-  if (!telegramId || !isAdmin(telegramId)) {
-    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-    return;
-  }
-
-  const message = `⚙️ **Maintenance Mode** ⚙️
-
-🔧 **Maintenance Features:**
-• Toggle bot availability
-• Custom maintenance messages
-• User access control
-• System status updates
-
-⚙️ *This feature requires additional implementation*
-
-🎯 **Current Status:** Bot is running normally
-👤 **Requested by:** @${ctx.from?.username}`;
 
   await sendFormattedMessage(ctx, message);
 });
@@ -2855,6 +2914,7 @@ bot.start().then(() => {
   console.log('✅ Bot is now running and polling for updates!');
   console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
   console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
+  console.log('🔧 Real maintenance mode functionality is now active!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
