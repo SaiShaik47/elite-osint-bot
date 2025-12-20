@@ -208,6 +208,33 @@ async function downloadFacebook(videoUrl) {
   }
 }
 
+// ===== VIDEO SENDER HELPER =====
+async function sendVideoDirect(ctx, apiData, caption) {
+  try {
+    const videoUrl =
+      apiData?.data?.result?.video ||
+      apiData?.data?.video ||
+      apiData?.data?.url ||
+      apiData?.data?.result?.url_download;
+
+    if (!videoUrl) {
+      return ctx.reply('❌ Failed to get video link.');
+    }
+
+    try {
+      await ctx.replyWithVideo(videoUrl, {
+        caption: caption,
+        supports_streaming: true
+      });
+    } catch (err) {
+      await ctx.reply(`${caption}\n\n⬇️ Download Link:\n${videoUrl}`);
+    }
+  } catch (error) {
+    console.error(error);
+    await ctx.reply('❌ Error while sending video.');
+  }
+}
+
 function generateTempEmail() {
   const domains = ['10minutemail.com', 'tempmail.org', 'guerrillamail.com'];
   const randomDomain = domains[Math.floor(Math.random() * domains.length)];
@@ -1041,241 +1068,118 @@ bot.command('terabox', async (ctx) => {
 bot.command('snap', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
-  // Check credits
   if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
-    return;
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
   }
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    await sendFormattedMessage(ctx, '🦼 *Usage: /snap <Snapchat video URL>*\n\nExample: /snap https://snapchat.com/t/H2D8zTxt');
-    return;
+    return sendFormattedMessage(ctx, '🦼 *Usage: /snap <Snapchat video URL>*');
   }
 
   await sendFormattedMessage(ctx, '🦼 *Downloading Snapchat video...*');
 
-  try {
-    const result = await downloadSnapchat(videoUrl.toString());
-    
-    if (result.success && result.data) {
-      const response = `🦼 **Snapchat Video Download** 🦼
+  const result = await downloadSnapchat(videoUrl.toString());
 
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 *Snapchat video download for educational purposes only*
-• 1 credit deducted from your balance`;
-
-      await sendFormattedMessage(ctx, response);
-      user.totalQueries++;
-    } else {
-      // Refund credit on failure
-      user.credits += 1;
-      await sendFormattedMessage(ctx, '❌ Failed to download Snapchat video. Please check the URL and try again.\n💳 1 credit refunded');
-    }
-  } catch (error) {
-    console.error('Error in snap command:', error);
-    // Refund credit on error
+  if (!result.success) {
     user.credits += 1;
-    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Snapchat video.\n💳 1 credit refunded');
+    return sendFormattedMessage(ctx, '❌ Failed to download Snapchat video.');
   }
+
+  await sendVideoDirect(
+    ctx,
+    result,
+    '🦼 Snapchat video downloaded successfully'
+  );
+
+  user.totalQueries++;
 });
 
 bot.command('insta', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    await sendFormattedMessage(ctx, '💎 *Usage: /insta <Instagram video URL>*\n\nExample: /insta https://www.instagram.com/reel/DSSvFDgjU3s/?igsh=dGQ0YW10Y2Rwb293');
-    return;
+    return sendFormattedMessage(ctx, '💎 *Usage: /insta <Instagram video URL>*');
   }
 
   await sendFormattedMessage(ctx, '💎 *Downloading Instagram video...*');
 
-  try {
-    const result = await downloadInstagram(videoUrl.toString());
-    
-    if (result.success && result.data) {
-      const response = `💎 **Instagram Video Download** 💎
+  const result = await downloadInstagram(videoUrl.toString());
 
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 *Instagram video download for educational purposes only*`;
-
-      await sendFormattedMessage(ctx, response);
-      user.totalQueries++;
-    } else {
-      await sendFormattedMessage(ctx, '❌ Failed to download Instagram video. Please check the URL and try again.');
-    }
-  } catch (error) {
-    console.error('Error in insta command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Instagram video.');
+  if (!result.success) {
+    return sendFormattedMessage(ctx, '❌ Failed to download Instagram video.');
   }
+
+  await sendVideoDirect(
+    ctx,
+    result,
+    '💎 Instagram video downloaded successfully'
+  );
+
+  user.totalQueries++;
 });
 
 bot.command('pin', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❤️ *Usage: /pin <Pinterest video URL>*\n\nExample: /pin https://pin.it/4gsJMxtt1');
-    return;
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    await sendFormattedMessage(ctx, '❤️ *Usage: /pin <Pinterest video URL>*\n\nExample: /pin https://pin.it/4gsJMxtt1');
-    return;
+    return sendFormattedMessage(ctx, '❤️ *Usage: /pin <Pinterest video URL>*');
   }
 
   await sendFormattedMessage(ctx, '❤️ *Downloading Pinterest video...*');
 
-  try {
-    const result = await downloadPinterest(videoUrl.toString());
-    
-    if (result.success && result.data) {
-      const response = `❤️ **Pinterest Video Download** ❤️
+  const result = await downloadPinterest(videoUrl.toString());
 
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 *Pinterest video download for educational purposes only*`;
-
-      await sendFormattedMessage(ctx, response);
-      user.totalQueries++;
-    } else {
-      await sendFormattedMessage(ctx, '❌ Failed to download Pinterest video. Please check the URL and try again.');
-    }
-  } catch (error) {
-    console.error('Error in pin command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Pinterest video.');
+  if (!result.success) {
+    return sendFormattedMessage(ctx, '❌ Failed to download Pinterest video.');
   }
-});
 
-// TeraBox Video Downloader
-bot.command('terabox', async (ctx) => {
-  try {
-    // Check if user has enough credits (only for non-premium users)
-    const user = await getUser(ctx.from.id);
-    if (!user.isPremium) {
-      const hasCredits = await deductCredits(ctx.from.id, 1);
-      if (!hasCredits) {
-        return ctx.reply('❌ You need at least 1 credit to use this command. Purchase credits with /buy or upgrade to premium with /upgrade.');
-      }
-    }
+  await sendVideoDirect(
+    ctx,
+    result,
+    '❤️ Pinterest video downloaded successfully'
+  );
 
-    const input = ctx.message.text;
-    const match = input.match(/\/terabox\s+(.+)/);
-    if (!match) {
-      if (!user.isPremium) {
-        // Refund credit if command format is invalid
-        await refundCredits(ctx.from.id, 1);
-      }
-      return ctx.reply('Please provide a TeraBox URL after the command.\nExample: /terabox https://terabox.com/s/1234567890');
-    }
-
-    const url = match[1];
-    await ctx.reply('⏳ Processing your TeraBox video...');
-
-    const response = await axios.get(`https://api-mfikri.com/api/terabox?url=${encodeURIComponent(url)}`);
-    
-    if (response.data.status && response.data.result) {
-      const videoData = response.data.result;
-      let message = '☁️ **TeraBox Video Downloaded Successfully!**\n\n';
-      
-      if (videoData.url_download) {
-        message += `🎥 **Download Link:** ${videoData.url_download}\n`;
-      }
-      
-      if (videoData.title) {
-        message += `\n📝 **Title:** ${videoData.title}`;
-      }
-      
-      if (videoData.size) {
-        message += `\n📊 **Size:** ${videoData.size}`;
-      }
-      
-      // Send the video if available
-      if (videoData.url_download) {
-        try {
-          await ctx.replyWithVideo(videoData.url_download, {
-            caption: message,
-            parse_mode: 'Markdown'
-          });
-        } catch (videoError) {
-          // If sending video fails, just send the download link
-          await ctx.reply(message, { parse_mode: 'Markdown' });
-        }
-      } else {
-        await ctx.reply(message, { parse_mode: 'Markdown' });
-      }
-    } else {
-      if (!user.isPremium) {
-        // Refund credit if API call fails
-        await refundCredits(ctx.from.id, 1);
-      }
-      ctx.reply('❌ Failed to download TeraBox video. Please check the URL and try again.');
-    }
-  } catch (error) {
-    console.error('TeraBox download error:', error.response?.data || error.message);
-    try {
-      // Refund credit on error
-      await refundCredits(ctx.from.id, 1);
-      ctx.reply('❌ An error occurred while processing your request. Please try again later.');
-    } catch (refundError) {
-      console.error('Refund error:', refundError.message);
-      ctx.reply('❌ An error occurred while processing your request.');
-    }
-  }
+  user.totalQueries++;
 });
 
 bot.command('fb', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❤️ *Usage: /fb <Facebook video URL>*\n\nExample: /fb https://www.facebook.com/reel/1157396829623170/');
-    return;
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    await sendFormattedMessage(ctx, '❤️ *Usage: /fb <Facebook video URL>*\n\nExample: /fb https://www.facebook.com/reel/1157396829623170/');
-    return;
+    return sendFormattedMessage(ctx, '❤️ *Usage: /fb <Facebook video URL>*');
   }
 
   await sendFormattedMessage(ctx, '❤️ *Downloading Facebook video...*');
 
-  try {
-    const result = await downloadFacebook(videoUrl.toString());
-    
-    if (result.success && result.data) {
-      const response = `❤️ **Facebook Video Download** ❤️
+  const result = await downloadFacebook(videoUrl.toString());
 
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 *Facebook video download for educational purposes only*`;
-
-      await sendFormattedMessage(ctx, response);
-      user.totalQueries++;
-    } else {
-      await sendFormattedMessage(ctx, '❌ Failed to download Facebook video. Please check the URL and try again.');
-    }
-  } catch (error) {
-    console.error('Error in fb command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while downloading Facebook video.');
+  if (!result.success) {
+    return sendFormattedMessage(ctx, '❌ Failed to download Facebook video.');
   }
+
+  await sendVideoDirect(
+    ctx,
+    result,
+    '❤️ Facebook video downloaded successfully'
+  );
+
+  user.totalQueries++;
 });
 
 bot.command('myip', async (ctx) => {
@@ -2196,7 +2100,7 @@ bot.command('approveall', async (ctx) => {
 • Total Credits Distributed: ${totalApproved * 25} 🪙
 
 👥 **Approved Users:**
-${approvedUsers.map((user, index) => `${index + 1}. @${user.username} (${user.userId})`).join('\n')}
+ ${approvedUsers.map((user, index) => `${index + 1}. @${user.username} (${user.userId})`).join('\n')}
 
 🎯 **Action Completed:**
 • Status: All Approved ✅
@@ -2658,7 +2562,7 @@ bot.command('checkstatus', async (ctx) => {
 
 📅 **Registration Date:** ${user.registrationDate.toLocaleDateString()}
 
-${!user.isApproved ? '\n⏳ *Your account is pending approval. Please wait for admin to review your request.*' : '\n✅ *Your account is approved and ready to use!*'}`;
+ ${!user.isApproved ? '\n⏳ *Your account is pending approval. Please wait for admin to review your request.*' : '\n✅ *Your account is approved and ready to use!*'}`;
 
     await sendFormattedMessage(ctx, statusMessage);
   } else {
