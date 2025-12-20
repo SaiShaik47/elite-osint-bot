@@ -229,11 +229,16 @@ async function downloadFacebook(videoUrl) {
   }
 }
 
+// Fixed TeraBox download function
 async function downloadTeraBox(videoUrl) {
   try {
     const apiKey = 'RushVx'; // Your API key
     const apiUrl = `https://teradl.tiiny.io/?key=${apiKey}&link=${encodeURIComponent(videoUrl)}`;
     const response = await axios.get(apiUrl, { timeout: 60000 }); // Increased timeout for large files
+    
+    // Log the response for debugging
+    console.log('TeraBox API Response:', JSON.stringify(response.data, null, 2));
+    
     return { success: true, data: response.data };
   } catch (error) {
     console.error('TeraBox API Error:', error.response?.data || error.message);
@@ -322,7 +327,7 @@ async function sendVideoSmart(ctx, videoUrl, caption) {
   }
 }
 
-// Handle TeraBox multi-video downloads
+// Fixed TeraBox multi-video downloads handler
 async function handleTeraBox(ctx, url) {
   try {
     const result = await downloadTeraBox(url);
@@ -341,7 +346,12 @@ async function handleTeraBox(ctx, url) {
     } else if (result.data.data && Array.isArray(result.data.data)) {
       videos = result.data.data;
     } else {
-      return sendFormattedMessage(ctx, '❌ No videos found in TeraBox response.');
+      // If we can't find an array of videos, check if the response itself contains a video
+      if (result.data.url || result.data.download_url) {
+        videos = [result.data];
+      } else {
+        return sendFormattedMessage(ctx, '❌ No videos found in TeraBox response.');
+      }
     }
     
     if (videos.length === 0) {
@@ -350,9 +360,27 @@ async function handleTeraBox(ctx, url) {
     
     // Send each video in a separate message with a delay to avoid rate limiting
     for (let i = 0; i < videos.length; i++) {
-      const videoUrl = videos[i].url || videos[i].download_url || videos[i];
+      let videoUrl = null;
       
-      if (!videoUrl) continue;
+      // Try multiple possible URL property names
+      if (videos[i]) {
+        videoUrl = videos[i].url || 
+                   videos[i].download_url || 
+                   videos[i].link || 
+                   videos[i].src || 
+                   videos[i].source;
+        
+        // If it's a string, use it directly
+        if (typeof videos[i] === 'string' && videos[i].startsWith('http')) {
+          videoUrl = videos[i];
+        }
+      }
+      
+      if (!videoUrl) {
+        console.log(`Could not extract URL for video ${i+1}:`, JSON.stringify(videos[i], null, 2));
+        await sendFormattedMessage(ctx, `❌ Could not extract download link for video ${i+1}/${videos.length}`);
+        continue;
+      }
       
       // Add a small delay between messages to avoid rate limiting
       if (i > 0) {
@@ -2311,7 +2339,7 @@ bot.command('approveall', async (ctx) => {
       };
     }
 
-    // Approve the user
+    // Approve user
     user.isApproved = true;
     user.credits = 25; // Give starting credits
     users.set(targetUserId, user);
@@ -2320,7 +2348,7 @@ bot.command('approveall', async (ctx) => {
       username: request.username || 'N/A'
     });
 
-    // Notify the user
+    // Notify user
     const userMessage = `🎉 **Registration Approved!** 🎉
 
 ✅ *Congratulations! Your registration has been approved.*
