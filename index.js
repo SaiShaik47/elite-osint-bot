@@ -220,27 +220,56 @@ async function downloadTeraBox(videoUrl) {
   }
 }
 
-// ===== VIDEO SENDER HELPER =====
-async function sendVideoDirect(ctx, apiData, caption) {
+// ===== ENHANCED VIDEO SENDER HELPER =====
+async function sendVideoDirect(ctx, apiData, commandName) {
   try {
-    // First, try to get the URL from the top level of the response
-    // This is common for simple APIs like the new TeraBox one
-    let videoUrl = apiData?.data?.url || apiData?.data?.download_url;
+    // --- Handle TeraBox API (returns an array of videos) ---
+    if (commandName === 'terabox' && apiData?.data && Array.isArray(apiData.data)) {
+      if (apiData.data.length === 0) {
+        return ctx.reply('❌ No videos found in the TeraBox response.');
+      }
+      for (let i = 0; i < apiData.data.length; i++) {
+        const videoItem = apiData.data[i];
+        const videoUrl = videoItem?.url || videoItem?.download_url;
 
-    // If not found, try deeper nested paths (for other services)
-    if (!videoUrl) {
-      videoUrl =
-        apiData?.data?.result?.video ||
-        apiData?.data?.video ||
-        apiData?.data?.result?.url_download ||
-        apiData?.data?.medias?.[0]?.url ||
-        apiData?.data?.medias?.[0]?.download ||
-        apiData?.data?.links?.download ||
-        apiData?.data?.result?.links?.download;
+        if (!videoUrl) {
+          console.warn(`TeraBox: No URL found for item ${i + 1}. Item:`, videoItem);
+          continue;
+        }
+        const itemCaption = `📁 TeraBox Video (Part ${i + 1}/${apiData.data.length})`;
+        try {
+          await ctx.replyWithVideo(videoUrl, { caption: itemCaption, supports_streaming: true });
+        } catch (err) {
+          console.error(`TeraBox: Failed to send video part ${i + 1}, sending link. Error:`, err.message);
+          await ctx.reply(`${itemCaption}\n\n⬇️ Download Link:\n${videoUrl}`);
+        }
+      }
+      return;
     }
 
+    // --- Handle Other APIs (Snapchat, Facebook, Instagram, Pinterest) ---
+    let videoUrl = null;
+
+    // First, try to get the URL from the top level of the response
+    if (apiData?.data) {
+      videoUrl = apiData.data.url || apiData.data.download_url;
+    }
+
+    // If not found, try deeper nested paths
+    if (!videoUrl && apiData?.data) {
+      videoUrl =
+        apiData.data.result?.video ||
+        apiData.data.video ||
+        apiData.data.result?.url_download ||
+        apiData.data.medias?.[0]?.url ||
+        apiData.data.medias?.[0]?.download ||
+        apiData.data.links?.download ||
+        apiData.data.result?.links?.download ||
+        apiData.data.response?.videos?.[0]?.url; // A common pattern for some APIs
+    }
+
+    // If still no URL, try a regex search as a last resort
     if (!videoUrl) {
-      // As a last resort, search the entire response for a video file extension
       const dataStr = JSON.stringify(apiData);
       const urlMatch = dataStr.match(/https?:\/\/[^\s"']+\.(mp4|mov|avi|webm|mkv)(\?[^"']*)?/gi);
       if (urlMatch && urlMatch.length > 0) {
@@ -249,21 +278,23 @@ async function sendVideoDirect(ctx, apiData, caption) {
     }
 
     if (!videoUrl) {
-      console.error('Could not extract video URL. API Response:', JSON.stringify(apiData, null, 2));
-      return ctx.reply('❌ Failed to get a valid video link from the API response.');
+      // --- THIS IS THE CRITICAL DEBUGGING PART ---
+      console.error(`❌ Could not extract video URL for /${commandName}. Full API Response:`, JSON.stringify(apiData, null, 2));
+      return ctx.reply(`❌ Failed to get a valid video link from the /${commandName} API response. The bot owner has been notified.`);
     }
 
+    // We found a URL, now try to send it
     try {
       await ctx.replyWithVideo(videoUrl, {
-        caption: caption,
+        caption: `✅ ${commandName.charAt(0).toUpperCase() + commandName.slice(1)} video downloaded successfully`,
         supports_streaming: true
       });
     } catch (err) {
-      console.error('Failed to send video directly, sending link instead. Error:', err.message);
-      await ctx.reply(`${caption}\n\n⬇️ Download Link:\n${videoUrl}`);
+      console.error(`Failed to send /${commandName} video directly, sending link instead. Error:`, err.message);
+      await ctx.reply(`⬇️ ${commandName.charAt(0).toUpperCase() + commandName.slice(1)} Video Download Link:\n\n${videoUrl}`);
     }
   } catch (error) {
-    console.error('Error in sendVideoDirect:', error);
+    console.error(`Error in sendVideoDirect for /${commandName}:`, error);
     await ctx.reply('❌ An unexpected error occurred while sending the video.');
   }
 }
@@ -1091,7 +1122,7 @@ bot.command('snap', async (ctx) => {
   await sendVideoDirect(
     ctx,
     result,
-    '🦼 Snapchat video downloaded successfully'
+    'snap' // Pass the command name
   );
 
   user.totalQueries++;
@@ -1119,7 +1150,7 @@ bot.command('insta', async (ctx) => {
   await sendVideoDirect(
     ctx,
     result,
-    '💎 Instagram video downloaded successfully'
+    'insta' // Pass the command name
   );
 
   user.totalQueries++;
@@ -1147,7 +1178,7 @@ bot.command('pin', async (ctx) => {
   await sendVideoDirect(
     ctx,
     result,
-    '❤️ Pinterest video downloaded successfully'
+    'pin' // Pass the command name
   );
 
   user.totalQueries++;
@@ -1175,7 +1206,7 @@ bot.command('fb', async (ctx) => {
   await sendVideoDirect(
     ctx,
     result,
-    '❤️ Facebook video downloaded successfully'
+    'fb' // Pass the command name
   );
 
   user.totalQueries++;
@@ -1196,19 +1227,20 @@ bot.command('terabox', async (ctx) => {
     return sendFormattedMessage(ctx, '📁 *Usage: /terabox <TeraBox video URL>*');
   }
 
-  await sendFormattedMessage(ctx, '📁 *Downloading TeraBox video...*');
+  await sendFormattedMessage(ctx, '📁 *Processing TeraBox link...*');
 
   const result = await downloadTeraBox(videoUrl.toString());
 
   if (!result.success) {
     user.credits += 1; // Refund credit on failure
-    return sendFormattedMessage(ctx, '❌ Failed to download TeraBox video.');
+    return sendFormattedMessage(ctx, '❌ Failed to process TeraBox link.');
   }
 
+  // The TeraBox API returns an array of video objects directly in result.data
   await sendVideoDirect(
     ctx,
-    result,
-    '📁 TeraBox video downloaded successfully'
+    { data: result.data }, // Pass the array of videos
+    'terabox' // Pass the command name
   );
 
   user.totalQueries++;
