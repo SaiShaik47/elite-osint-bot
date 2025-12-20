@@ -224,6 +224,26 @@ async function downloadTeraBox(videoUrl) {
   }
 }
 
+// Function to extract direct video URL from m3u8 playlist
+async function extractVideoFromM3U8(m3u8Url) {
+  try {
+    const response = await axios.get(m3u8Url, { timeout: 10000 });
+    const m3u8Content = response.data;
+    
+    // Look for video URLs in the playlist
+    const videoUrlMatch = m3u8Content.match(/https?:\/\/[^\s"']+\.(mp4|mov|avi|webm|mkv)(\?[^"'\s]*)?/gi);
+    
+    if (videoUrlMatch && videoUrlMatch.length > 0) {
+      return videoUrlMatch[0]; // Return the first video URL found
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error extracting video from m3u8:', error);
+    return null;
+  }
+}
+
 // ===== HELPER FUNCTIONS =====
 
 // Auto-detect platform from URL
@@ -279,13 +299,17 @@ async function getVideoInfo(url) {
 }
 
 // Smart video sender with size detection
-async function sendVideoSmart(ctx, videoUrl, caption) {
+async function sendVideoSmart(ctx, videoUrl, caption, videoIndex = null, totalVideos = 1) {
   try {
     // Get video information first
     const videoInfo = await getVideoInfo(videoUrl);
     
     // Create caption with video info
-    const fullCaption = `${caption}\n\n📊 Size: ${videoInfo.sizeMB}MB | Type: ${videoInfo.type}`;
+    let fullCaption = caption;
+    if (videoIndex !== null && totalVideos > 1) {
+      fullCaption = `${caption} (${videoIndex}/${totalVideos})`;
+    }
+    fullCaption += `\n\n📊 Size: ${videoInfo.sizeMB}MB | Type: ${videoInfo.type}`;
     
     if (videoInfo.canSend) {
       await ctx.replyWithVideo(videoUrl, {
@@ -311,7 +335,7 @@ async function handleTeraBox(ctx, url) {
     const result = await downloadTeraBox(url);
     
     if (!result.success) {
-      return sendFormattedMessage(ctx, '❌ Failed to process TeraBox link.');
+      return sendFormattedMessage(ctx, '❌ Failed to process TeraBox link. Please check the URL and try again.');
     }
     
     // Handle different response formats
@@ -324,30 +348,34 @@ async function handleTeraBox(ctx, url) {
     } else if (result.data.data && Array.isArray(result.data.data)) {
       videos = result.data.data;
     } else {
-      return sendFormattedMessage(ctx, '❌ No videos found in TeraBox response.');
+      return sendFormattedMessage(ctx, '❌ No videos found in TeraBox response. The API may have changed or the link is invalid.');
     }
     
     if (videos.length === 0) {
-      return sendFormattedMessage(ctx, '❌ No videos found in TeraBox link.');
+      return sendFormattedMessage(ctx, '❌ No videos found in TeraBox link. The link may be invalid or expired.');
     }
     
-    // Send each video
+    // Send each video with a different message
     for (let i = 0; i < videos.length; i++) {
       const videoUrl = videos[i].url || videos[i].download_url || videos[i];
       
       if (!videoUrl) continue;
       
+      // Create a unique caption for each video
+      const videoName = videos[i].name || `Video ${i + 1}`;
       await sendVideoSmart(
         ctx,
         videoUrl,
-        `📦 TeraBox Video ${i + 1}/${videos.length}`
+        `📦 TeraBox: ${videoName}`,
+        i + 1,
+        videos.length
       );
     }
     
     return true;
   } catch (error) {
     console.error('Error handling TeraBox:', error);
-    return sendFormattedMessage(ctx, '❌ Error processing TeraBox link.');
+    return sendFormattedMessage(ctx, '❌ Error processing TeraBox link. Please try again later.');
   }
 }
 
@@ -364,11 +392,11 @@ async function handleSingleVideo(ctx, url, platform) {
     else return sendFormattedMessage(ctx, '❌ Unsupported platform.');
     
     if (!result.success) {
-      return sendFormattedMessage(ctx, `❌ Failed to download ${platform} video.`);
+      return sendFormattedMessage(ctx, `❌ Failed to download ${platform} video. Please check the URL and try again.`);
     }
     
     // Extract video URL from response
-    const videoUrl =
+    let videoUrl =
       result.data?.result?.video ||
       result.data?.video ||
       result.data?.url ||
@@ -379,16 +407,21 @@ async function handleSingleVideo(ctx, url, platform) {
       result.data?.result?.links?.download ||
       result.data?.response?.videos?.[0]?.url;
     
+    // Handle m3u8 playlist URLs (like the Snapchat URL you provided)
+    if (!videoUrl && result.data?.url && result.data.url.includes('.m3u8')) {
+      videoUrl = await extractVideoFromM3U8(result.data.url);
+    }
+    
     if (!videoUrl) {
       console.error(`Could not extract video URL for ${platform}. Full API Response:`, JSON.stringify(result, null, 2));
-      return sendFormattedMessage(ctx, `❌ Failed to get video URL from ${platform} API.`);
+      return sendFormattedMessage(ctx, `❌ Failed to get video URL from ${platform} API. The video may be private or deleted.`);
     }
     
     await sendVideoSmart(ctx, videoUrl, `🎬 ${platform.charAt(0).toUpperCase() + platform.slice(1)} Video`);
     return true;
   } catch (error) {
     console.error(`Error handling ${platform}:`, error);
-    return sendFormattedMessage(ctx, `❌ Error processing ${platform} video.`);
+    return sendFormattedMessage(ctx, `❌ Error processing ${platform} video. Please try again later.`);
   }
 }
 
@@ -2008,7 +2041,7 @@ bot.command('users', async (ctx) => {
 ✅ **Approved Users:** ${Array.from(users.values()).filter(u => u.isApproved).length}
 👑 **Admins:** ${Array.from(users.values()).filter(u => u.isAdmin).length}
 
-📊 **User Details:**
+📊 **User Details:>
  ${userList}
 
 💎 Legend: 💎 Premium | ✅ Approved | ⏳ Pending | 👑 Admin`;
@@ -2348,7 +2381,7 @@ bot.command('adminstats', async (ctx) => {
 
   const totalUsers = users.size;
   const approvedUsers = Array.from(users.values()).filter(u => u.isApproved).length;
-  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
+  const premiumUsers = Array.from users.values()).filter(u => u.isPremium).length;
   const adminUsers = Array.from(users.values()).filter(u => u.isAdmin).length;
   const totalQueries = Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0);
   const pendingRegistrations = registrationRequests.size;
@@ -2398,7 +2431,7 @@ bot.command('activity', async (ctx) => {
 
   const activityMessage = `📈 **Recent Activity Log** 📈
 
-👥 **Most Active Users (Top 10):**
+👥 **Most Active Users (Top 10):}
  ${activityList || 'No recent activity'}
 
 📊 **Activity Summary:**
@@ -2436,12 +2469,7 @@ bot.command('revenue', async (ctx) => {
 💵 **Revenue Estimates:**
 • Monthly Price: $${monthlyPremiumPrice}
 • Estimated Monthly Revenue: $${estimatedMonthlyRevenue.toFixed(2)}
-• Estimated Yearly Revenue: $${estimatedYearlyRevenue.toFixed(2)}
-
-📈 **Growth Potential:**
-• Target Conversion: 10%
-• Potential Premium Users: ${Math.round(totalUsers * 0.1)}
-• Potential Monthly Revenue: $${(Math.round(totalUsers * 0.1) * monthlyPremiumPrice).toFixed(2)}`;
+• Estimated Yearly Revenue: $${estimatedYearlyRevenue.toFixed(2)}`;
 
   await sendFormattedMessage(ctx, revenueMessage);
 });
@@ -2762,7 +2790,7 @@ bot.command('logs', async (ctx) => {
 • System performance logs
 • Security logs
 
-📊 **Current System Status:**
+📊 **Current System Status:`
 • Bot: ✅ Online
 • Users: ${users.size} registered
 • Queries: ${Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0)} total
@@ -2822,7 +2850,7 @@ bot.command('checkstatus', async (ctx) => {
 
 📅 **Registration Date:** ${user.registrationDate.toLocaleDateString()}
 
- ${!user.isApproved ? '\n⏳ *Your account is pending approval. Please wait for admin to review your request.*' : '\n✅ *Your account is approved and ready to use!*'}`;
+ ${!user.isApproved ? '\n✅ *Your account is approved and ready to use!*' : '\n⏳ *Your account is pending approval. Please wait for admin to review your request.*'}`;
 
     await sendFormattedMessage(ctx, statusMessage);
   } else {
@@ -2874,7 +2902,6 @@ bot.command('sync', async (ctx) => {
 // Test command
 bot.command('test', async (ctx) => {
   await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
-});
 
 // Error handling with conflict resolution
 bot.catch((err) => {
