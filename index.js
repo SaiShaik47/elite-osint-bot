@@ -604,7 +604,7 @@ bot.command('start', async (ctx) => {
 Your account is pending approval by our admin team. 
 
 🔹 Join ${verificationChannel} to get started
-🔹 Use /verify to confirm you've joined
+🔹 Click "Verify Membership" after joining
 🔹 Then use /register to submit your registration request
 🔹 You'll be notified once approved
 🔹 Premium features will be available after approval
@@ -613,9 +613,10 @@ Your account is pending approval by our admin team.
 
 🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
 
-    // Create inline keyboard with join button
+    // Create inline keyboard with join and verify buttons
     const keyboard = new InlineKeyboard()
-      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`);
+      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+      .text("✅ Verify Membership", `verify_${ctx.from.id}`);
 
     await ctx.reply(welcomeMessage, { reply_markup: keyboard });
     return;
@@ -667,33 +668,6 @@ Your account is pending approval by our admin team.
 🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
 
   await sendFormattedMessage(ctx, welcomeMessage);
-});
-
-// Verify command to check if user has joined the channel
-bot.command('verify', async (ctx) => {
-  const telegramId = ctx.from?.id.toString();
-  
-  if (!telegramId) return;
-
-  // Check if user is already verified
-  if (verifiedUsers.has(telegramId)) {
-    await sendFormattedMessage(ctx, '✅ *You have already verified your channel membership!* You can now proceed with registration using /register.');
-    return;
-  }
-
-  // Check if user is a member of the verification channel
-  const isMember = await checkChannelMembership(telegramId);
-  
-  if (isMember) {
-    verifiedUsers.add(telegramId);
-    await sendFormattedMessage(ctx, '✅ *Verification successful!* You have joined the updates channel. You can now proceed with registration using /register.');
-  } else {
-    // Create inline keyboard with join button
-    const keyboard = new InlineKeyboard()
-      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`);
-    
-    await sendFormattedMessage(ctx, `❌ *Verification failed!* You need to join ${verificationChannel} before you can register.\n\nPlease join the channel and try /verify again.`, keyboard);
-  }
 });
 
 // Registration command
@@ -3005,7 +2979,7 @@ bot.command('checkstatus', async (ctx) => {
           .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
           .text("✅ Verify Membership", `verify_${telegramId}`);
         
-        await sendFormattedMessage(ctx, '❌ *No registration found.*\n\nPlease join the updates channel and verify your membership before registering.', keyboard);
+        await sendFormattedMessage(ctx, '❌ *No registration found.*\n\nPlease join updates channel and verify your membership before registering.', keyboard);
       }
     }
   }
@@ -3043,12 +3017,12 @@ bot.command('sync', async (ctx) => {
   }
 
   // Note: Made admins need to be manually restored by original admin if bot restarts
-  await sendFormattedMessage(ctx, '❌ *No approved registration found.*\n\n📋 **If you were made admin but lost access:**\n• Contact the original admin (@fuck_sake)\n• Or use /register to submit new request\n\n💡 *Made admins lose access if bot restarts - this is normal for security.*');
+  await sendFormattedMessage(ctx, '❌ *No approved registration found.*\n\n📋 **If you were made admin but lost access:**\n• Contact original admin (@fuck_sake)\n• Or use /register to submit new request\n\n💡 *Made admins lose access if bot restarts - this is normal for security.*');
 });
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /verify\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
 });
 
 // Error handling with conflict resolution
