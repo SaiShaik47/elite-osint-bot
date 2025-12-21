@@ -35,9 +35,6 @@ const verifiedUsers = new Set(); // Track users who have verified channel member
 const registeredUsers = new Set(); // Track users who have completed registration
 const adminId = process.env.ADMIN_USER_ID;
 
-// User state management for callback buttons
-const userStates = new Map(); // Track which tool a user has selected
-
 // Maintenance mode flag (stored in memory, will reset on bot restart)
 let maintenanceMode = false;
 let maintenanceMessage = "Bot is currently under maintenance. Please try again later.";
@@ -674,66 +671,6 @@ async function notifyAdmin(message, keyboard) {
   }
 }
 
-// Create main menu keyboard
-function createMainMenu() {
-  return new InlineKeyboard()
-    .text('🔍 Advanced Lookup Tools', 'menu_lookup')
-    .text('📱 Social Media Downloaders', 'menu_downloaders')
-    .row()
-    .text('📊 System Commands', 'menu_system')
-    .text('❌ Cancel', 'menu_cancel');
-}
-
-// Create lookup tools menu
-function createLookupMenu() {
-  return new InlineKeyboard()
-    .text('🌐 IP Lookup', 'tool_ip')
-    .text('📧 Email Validation', 'tool_email')
-    .row()
-    .text('📱 Phone Number Lookup', 'tool_num')
-    .text('📱 Basic Number Info', 'tool_basicnum')
-    .row()
-    .text('🇵🇰 Pakistani Number Lookup', 'tool_paknum')
-    .text('📷 Instagram Lookup', 'tool_ig')
-    .row()
-    .text('💳 BIN Lookup', 'tool_bin')
-    .text('🚗 Vehicle Info', 'tool_vehicle')
-    .row()
-    .text('🎮 Free Fire Stats', 'tool_ff')
-    .text('🔙 Back to Main Menu', 'menu_main');
-}
-
-// Create downloaders menu
-function createDownloadersMenu() {
-  return new InlineKeyboard()
-    .text('🎬 Universal Downloader', 'tool_dl')
-    .text('🦼 Snapchat', 'tool_snap')
-    .row()
-    .text('💎 Instagram', 'tool_insta')
-    .text('❤️ Pinterest', 'tool_pin')
-    .row()
-    .text('📘 Facebook', 'tool_fb')
-    .text('📁 TeraBox', 'tool_terabox')
-    .row()
-    .text('🔙 Back to Main Menu', 'menu_main');
-}
-
-// Create system commands menu
-function createSystemMenu() {
-  return new InlineKeyboard()
-    .text('🌐 My IP', 'tool_myip')
-    .text('🖥️ User Agent', 'tool_useragent')
-    .row()
-    .text('📧 Temporary Email', 'tool_tempmail')
-    .text('📊 My Stats', 'tool_stats')
-    .row()
-    .text('💳 My Credits', 'tool_credits')
-    .text('📋 Check Status', 'tool_checkstatus')
-    .row()
-    .text('🔄 Sync Account', 'tool_sync')
-    .text('🔙 Back to Main Menu', 'menu_main');
-}
-
 // ===============================
 // GLOBAL BOT LOCK MIDDLEWARE
 // ===============================
@@ -801,723 +738,6 @@ bot.use((ctx, next) => {
 });
 
 // ===============================
-// MENU CALLBACK HANDLERS
-// ===============================
-bot.callbackQuery(/^menu_/, async (ctx) => {
-  const userId = ctx.from?.id.toString();
-  const action = ctx.callbackQuery.data.split('_')[1];
-  
-  await ctx.answerCallbackQuery();
-  
-  switch (action) {
-    case 'main':
-      await ctx.editMessageText('🚀 Welcome to Premium OSINT Bot 🚀\n\n✨ Your Ultimate Open Source Intelligence Assistant ✨\n\nPlease select a category:', {
-        reply_markup: createMainMenu()
-      });
-      break;
-      
-    case 'lookup':
-      await ctx.editMessageText('🔍 Advanced Lookup Tools 🔍\n\nSelect a tool:', {
-        reply_markup: createLookupMenu()
-      });
-      break;
-      
-    case 'downloaders':
-      await ctx.editMessageText('📱 Social Media Video Downloaders 📱\n\nSelect a platform:', {
-        reply_markup: createDownloadersMenu()
-      });
-      break;
-      
-    case 'system':
-      await ctx.editMessageText('📊 System Commands 📊\n\nSelect a command:', {
-        reply_markup: createSystemMenu()
-      });
-      break;
-      
-    case 'cancel':
-      // Clear user state
-      userStates.delete(userId);
-      await ctx.editMessageText('❌ Operation cancelled. Use /start to begin again.');
-      break;
-  }
-});
-
-// ===============================
-// TOOL CALLBACK HANDLERS
-// ===============================
-bot.callbackQuery(/^tool_/, async (ctx) => {
-  const userId = ctx.from?.id.toString();
-  const tool = ctx.callbackQuery.data.split('_')[1];
-  
-  await ctx.answerCallbackQuery();
-  
-  // Set user state
-  userStates.set(userId, { tool, waitingForInput: true });
-  
-  // Provide instructions based on the selected tool
-  let instruction = '';
-  
-  switch (tool) {
-    case 'ip':
-      instruction = '🌐 IP Lookup\n\nPlease send the IP address you want to lookup.\n\nExample: 8.8.8.8\n\nSend "self" to lookup your own IP.';
-      break;
-      
-    case 'email':
-      instruction = '📧 Email Validation\n\nPlease send the email address you want to validate.\n\nExample: user@example.com';
-      break;
-      
-    case 'num':
-      instruction = '📱 Phone Number Lookup\n\nPlease send the phone number you want to lookup.\n\nExample: 9389482769';
-      break;
-      
-    case 'basicnum':
-      instruction = '📱 Basic Number Information\n\nPlease send the phone number you want to get basic info for.\n\nExample: 919087654321';
-      break;
-      
-    case 'paknum':
-      instruction = '🇵🇰 Pakistani Number Lookup\n\nPlease send the Pakistani number or CNIC you want to lookup.\n\nExample: 03005854962\nExample: 2150952917167';
-      break;
-      
-    case 'ig':
-      instruction = '📷 Instagram Lookup\n\nPlease send the Instagram username you want to lookup.\n\nExample: instagram';
-      break;
-      
-    case 'bin':
-      instruction = '💳 BIN Lookup\n\nPlease send the BIN number you want to lookup.\n\nExample: 460075';
-      break;
-      
-    case 'vehicle':
-      instruction = '🚗 Vehicle Information\n\nPlease send the vehicle number you want to lookup.\n\nExample: MH04KA0151';
-      break;
-      
-    case 'ff':
-      instruction = '🎮 Free Fire Statistics\n\nPlease send the Free Fire UID you want to lookup.\n\nExample: 2819649271';
-      break;
-      
-    case 'dl':
-      instruction = '🎬 Universal Video Downloader\n\nPlease send the video URL you want to download.\n\nExample: https://www.instagram.com/reel/DSSvFDgjU3s/';
-      break;
-      
-    case 'snap':
-      instruction = '🦼 Snapchat Video Downloader\n\nPlease send the Snapchat video URL you want to download.\n\nExample: https://snapchat.com/t/H2D8zTxt';
-      break;
-      
-    case 'insta':
-      instruction = '💎 Instagram Video Downloader\n\nPlease send the Instagram video URL you want to download.\n\nExample: https://www.instagram.com/reel/DSSvFDgjU3s/';
-      break;
-      
-    case 'pin':
-      instruction = '❤️ Pinterest Video Downloader\n\nPlease send the Pinterest video URL you want to download.\n\nExample: https://pin.it/4gsJMxtt1';
-      break;
-      
-    case 'fb':
-      instruction = '📘 Facebook Video Downloader\n\nPlease send the Facebook video URL you want to download.\n\nExample: https://www.facebook.com/reel/1157396829623170/';
-      break;
-      
-    case 'terabox':
-      instruction = '📁 TeraBox Video Downloader\n\nPlease send the TeraBox video URL you want to download.\n\nExample: https://terabox.com/s/xxxxxxxx';
-      break;
-      
-    case 'myip':
-      // Execute immediately without waiting for input
-      userStates.delete(userId);
-      return executeTool(ctx, 'myip', null);
-      
-    case 'useragent':
-      // Execute immediately without waiting for input
-      userStates.delete(userId);
-      return executeTool(ctx, 'useragent', null);
-      
-    case 'tempmail':
-      // Execute immediately without waiting for input
-      userStates.delete(userId);
-      return executeTool(ctx, 'tempmail', null);
-      
-    case 'stats':
-      // Execute immediately without waiting for input
-      userStates.delete(userId);
-      return executeTool(ctx, 'stats', null);
-      
-    case 'credits':
-      // Execute immediately without waiting for input
-      userStates.delete(userId);
-      return executeTool(ctx, 'credits', null);
-      
-    case 'checkstatus':
-      // Execute immediately without waiting for input
-      userStates.delete(userId);
-      return executeTool(ctx, 'checkstatus', null);
-      
-    case 'sync':
-      // Execute immediately without waiting for input
-      userStates.delete(userId);
-      return executeTool(ctx, 'sync', null);
-      
-    default:
-      userStates.delete(userId);
-      await ctx.editMessageText('❌ Unknown tool. Please try again.');
-      return;
-  }
-  
-  // Add cancel button to the instruction message
-  const keyboard = new InlineKeyboard().text('❌ Cancel', 'menu_cancel');
-  
-  await ctx.editMessageText(instruction, { reply_markup: keyboard });
-});
-
-// ===============================
-// TOOL EXECUTION FUNCTION
-// ===============================
-async function executeTool(ctx, tool, input) {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need approval to use this tool. Use /register to submit your request.');
-    return;
-  }
-  
-  // Check credits for tools that require them
-  if (['ip', 'email', 'num', 'basicnum', 'paknum', 'ig', 'bin', 'vehicle', 'ff', 'dl', 'snap', 'insta', 'pin', 'fb', 'terabox'].includes(tool)) {
-    if (!deductCredits(user)) {
-      await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
-      return;
-    }
-  }
-  
-  try {
-    let result;
-    
-    switch (tool) {
-      case 'ip':
-        await sendFormattedMessage(ctx, '🔍 Fetching IP intelligence...');
-        result = await getIpInfo(input === 'self' ? undefined : input);
-        
-        if (result.success && result.data) {
-          const response = `🌐 IP Intelligence Results 🌐
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 IP information for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please check the IP address and try again.\n💳 1 credit refunded');
-        }
-        break;
-        
-      case 'email':
-        await sendFormattedMessage(ctx, '🔍 Validating email address...');
-        result = await validateEmail(input);
-        
-        if (result.success && result.data) {
-          const response = `📧 Email Validation Results 📧
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 Email validation for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, '❌ Failed to validate email address. Please check the email and try again.\n💳 1 credit refunded');
-        }
-        break;
-        
-      case 'num':
-        await sendFormattedMessage(ctx, '🔍 Looking up phone number...');
-        result = await getPhoneNumberInfo(input);
-        
-        if (result.success && result.data) {
-          const response = `📱 Phone Number Lookup Results 📱
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 Phone number information for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, '❌ Failed to lookup phone number. Please check the number and try again.\n💳 1 credit refunded');
-        }
-        break;
-        
-      case 'basicnum':
-        await sendFormattedMessage(ctx, '🔍 Getting basic number information...');
-        result = await getBasicNumberInfo(input);
-        
-        if (result.success && result.data) {
-          const response = `📱 Basic Number Information 📱
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 Basic number information for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, '❌ Failed to get basic number information. Please check the number and try again.\n💳 1 credit refunded');
-        }
-        break;
-        
-      case 'paknum':
-        await sendFormattedMessage(ctx, '🔍 Looking up Pakistani government number information...');
-        result = await getPakistaniGovtNumberInfo(input);
-        
-        if (result.success && result.data && result.data.length > 0) {
-          // Format the results as JSON with colored formatting
-          const formattedResults = result.data.map((record, index) => ({
-            [`Record #${index + 1}`]: {
-              name: record.name || 'N/A',
-              number: record.n || 'N/A',
-              cnic: record.cnic || 'N/A',
-              address: record.address || 'N/A'
-            }
-          }));
-          
-          const response = `📱 Pakistani Government Number Information 📱
-
-🔍 Found ${result.count} record(s) for: ${input}
-
-\`\`\`json
- ${JSON.stringify(formattedResults, null, 2)}
-\`\`\`
-
-💡 Information for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, `❌ ${result.error || 'No records found for the provided number or CNIC'}\n💳 1 credit refunded`);
-        }
-        break;
-        
-      case 'ig':
-        await sendFormattedMessage(ctx, '🔍 Fetching Instagram intelligence...');
-        result = await getInstagramInfo(input);
-        
-        if (result.success && result.data) {
-          const response = `📷 Instagram Intelligence Results 📷
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 Instagram information for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, '❌ Failed to fetch Instagram information. Please check the username and try again.\n💳 1 credit refunded');
-        }
-        break;
-        
-      case 'bin':
-        await sendFormattedMessage(ctx, '🔍 Looking up BIN information...');
-        result = await getBinInfo(input);
-        
-        if (result.success && result.data) {
-          const response = `💳 BIN Lookup Results 💳
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 BIN information for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, '❌ Failed to lookup BIN information. Please check the BIN and try again.\n💳 1 credit refunded');
-        }
-        break;
-        
-      case 'vehicle':
-        await sendFormattedMessage(ctx, '🔍 Fetching vehicle details...');
-        result = await getVehicleInfo(input);
-        
-        if (result.success && result.data) {
-          const response = `🚗 Vehicle Details Results 🚗
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 Vehicle information for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, '❌ Failed to fetch vehicle details. Please check the vehicle number and try again.\n💳 1 credit refunded');
-        }
-        break;
-        
-      case 'ff':
-        await sendFormattedMessage(ctx, '🔍 Fetching Free Fire statistics...');
-        result = await getFreeFireStats(input);
-        
-        if (result.success && result.data) {
-          const response = `🎮 Free Fire Statistics Results 🎮
-
-\`\`\`json
- ${JSON.stringify(result.data, null, 2)}
-\`\`\`
-
-💡 Free Fire statistics for educational purposes only
-• 1 credit deducted from your balance`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          // Refund credit on failure
-          user.credits += 1;
-          await sendFormattedMessage(ctx, '❌ Failed to fetch Free Fire statistics. Please check the UID and try again.\n💳 1 credit refunded');
-        }
-        break;
-        
-      case 'dl':
-        const platform = detectPlatform(input);
-        if (platform === 'unknown') {
-          user.credits += 1; // Refund credit
-          return sendFormattedMessage(ctx, '❌ Unsupported platform. Please use a link from Instagram, Facebook, Snapchat, Pinterest, or TeraBox.\n💳 1 credit refunded');
-        }
-        
-        await sendFormattedMessage(ctx, `⏳ Processing ${platform} video...`);
-        
-        if (platform === 'terabox') {
-          result = await handleTeraBox(ctx, input);
-        } else {
-          result = await handleSingleVideo(ctx, input, platform);
-        }
-        
-        if (result) {
-          user.totalQueries++;
-        } else {
-          user.credits += 1; // Refund credit on failure
-        }
-        break;
-        
-      case 'snap':
-        await sendFormattedMessage(ctx, '🦼 Downloading Snapchat video...');
-        result = await handleSingleVideo(ctx, input, 'snap');
-        
-        if (result) {
-          user.totalQueries++;
-        } else {
-          user.credits += 1; // Refund credit on failure
-        }
-        break;
-        
-      case 'insta':
-        await sendFormattedMessage(ctx, '💎 Downloading Instagram video...');
-        result = await handleSingleVideo(ctx, input, 'insta');
-        
-        if (result) {
-          user.totalQueries++;
-        } else {
-          user.credits += 1; // Refund credit on failure
-        }
-        break;
-        
-      case 'pin':
-        await sendFormattedMessage(ctx, '❤️ Downloading Pinterest video...');
-        result = await handleSingleVideo(ctx, input, 'pin');
-        
-        if (result) {
-          user.totalQueries++;
-        } else {
-          user.credits += 1; // Refund credit on failure
-        }
-        break;
-        
-      case 'fb':
-        await sendFormattedMessage(ctx, '❤️ Downloading Facebook video...');
-        result = await handleSingleVideo(ctx, input, 'fb');
-        
-        if (result) {
-          user.totalQueries++;
-        } else {
-          user.credits += 1; // Refund credit on failure
-        }
-        break;
-        
-      case 'terabox':
-        await sendFormattedMessage(ctx, '📁 Processing TeraBox link...');
-        result = await handleTeraBox(ctx, input);
-        
-        if (result) {
-          user.totalQueries++;
-        } else {
-          user.credits += 1; // Refund credit on failure
-        }
-        break;
-        
-      case 'myip':
-        await sendFormattedMessage(ctx, '🔍 Fetching your IP information...');
-        result = await getIpInfo();
-        
-        if (result.success && result.data) {
-          const ip = result.data.ip || 'Unknown';
-          const city = result.data.city || 'Unknown';
-          const region = result.data.region || 'Unknown';
-          const country = result.data.country || 'Unknown';
-          const org = result.data.org || 'Unknown';
-          const timezone = result.data.timezone || 'Unknown';
-
-          const response = `🌐 Your IP Information 🌐
-
-📍 Location Details:
-• IP Address: \`${ip}\`
-• City: ${city}
-• Region: ${region}
-• Country: ${country}
-• Organization: ${org}
-• Timezone: ${timezone}
-
-🔍 Network Information:
-• ISP: ${org}
-• Connection Type: Detected
-
-💡 This information is for educational purposes only`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please try again.');
-        }
-        break;
-        
-      case 'useragent':
-        result = getUserAgentInfo();
-        
-        if (result.success && result.data) {
-          const response = `🖥️ Browser & System Information 🖥️
-
-🌐 Browser Details:
-• Browser: ${result.data.browser}
-• Version: ${result.data.version}
-• Platform: ${result.data.platform}
-• Mobile: ${result.data.mobile ? 'Yes' : 'No'}
-
-📱 User Agent String:
-\`${result.data.user_agent}\`
-
-💡 This is the bot's user agent information`;
-
-          await sendFormattedMessage(ctx, response);
-        } else {
-          await sendFormattedMessage(ctx, '❌ Failed to fetch user agent information.');
-        }
-        break;
-        
-      case 'tempmail':
-        result = generateTempEmail();
-        
-        if (result.success && result.data) {
-          const response = `📧 Temporary Email Generated 📧
-
-🔑 Email Address:
-\`${result.data.email}\`
-
-⏰ Details:
-• Expires in: ${result.data.expires_in}
-• Domain: ${result.data.domain}
-
-💡 Important Notes:
-• This email will expire automatically
-• Use for temporary registrations only
-• Don't use for important communications
-• Check the inbox regularly
-
-🔒 Privacy protected - No logs stored`;
-
-          await sendFormattedMessage(ctx, response);
-          user.totalQueries++;
-        } else {
-          await sendFormattedMessage(ctx, '❌ Failed to generate temporary email.');
-        }
-        break;
-        
-      case 'stats':
-        const statsResponse = `📊 Your Usage Statistics 📊
-
-👤 Account Information:
-• Username: @${user.username || 'N/A'}
-• Status: ${user.isPremium ? '💎 Premium' : '🔹 Standard'}
-• Credits: ${user.credits} 🪙
-• Member Since: ${user.registrationDate.toLocaleDateString()}
-
-📈 Usage Statistics:
-• Total Queries: ${user.totalQueries}
-• Credits Available: ${user.credits}
-
-💎 ${user.isPremium ? 'Premium Member - Unlimited Access!' : 'Upgrade to Premium for unlimited queries!'}`;
-
-        await sendFormattedMessage(ctx, statsResponse);
-        break;
-        
-      case 'credits':
-        const creditsResponse = `💳 Credit Information 💳
-
-🪙 Current Balance: ${user.credits} credits
-
-👤 Account Status:
- ${user.isPremium ? '💎 Premium Member' : '🔹 Standard Member'}
- ${user.isPremium ? '✅ Unlimited queries' : `📊 Daily limit: ${user.credits} queries`}
-
-📈 Usage Statistics:
-• Total Queries: ${user.totalQueries}
-• Credits Available: ${user.credits}
-
-🎁 Want more credits?
-• Upgrade to Premium for unlimited access
-• Contact admin for credit requests
-
-💡 Each query consumes 1 credit`;
-
-        await sendFormattedMessage(ctx, creditsResponse);
-        break;
-        
-      case 'checkstatus':
-        if (user) {
-          const statusMessage = `📋 Your Registration Status 📋
-
-👤 Account Information:
-• Telegram ID: ${ctx.from.id}
-• Username: @${user.username || 'N/A'}
-• Status: ${user.isApproved ? '✅ Approved' : '❌ Not Approved'}
-• Credits: ${user.credits} 🪙
-• Premium: ${user.isPremium ? '💎 Yes' : '🔹 No'}
-
-📅 Registration Date: ${user.registrationDate.toLocaleDateString()}
-
- ${!user.isApproved ? '\n⏳ Your account is pending approval. Please wait for the admin to review your request.' : '\n✅ Your account is approved and ready to use!'}`;
-
-          await sendFormattedMessage(ctx, statusMessage);
-        } else {
-          // Check if there's a pending registration request
-          const request = registrationRequests.get(ctx.from.id.toString());
-          if (request) {
-            await sendFormattedMessage(ctx, '⏳ Your registration is pending approval.\n\nPlease wait for the admin to review your request.');
-          } else {
-            // Check if user has verified channel membership
-            if (verifiedUsers.has(ctx.from.id.toString())) {
-              await sendFormattedMessage(ctx, '✅ You have verified your channel membership! You can now proceed with registration using /register.');
-            } else {
-              // Create inline keyboard with join and verify buttons
-              const keyboard = new InlineKeyboard()
-                .url("📢 Join Updates Channel", CHANNEL_URL)
-                .text("✅ Verify Membership", `verify_${ctx.from.id}`);
-              
-              await sendFormattedMessage(ctx, '❌ No registration found.\n\nPlease join the updates channel and verify your membership before registering.', keyboard);
-            }
-          }
-        }
-        break;
-        
-      case 'sync':
-        if (user && user.isApproved) {
-          await sendFormattedMessage(ctx, '✅ Your account is already synced and approved!');
-        } else {
-          // Auto-approve if admin ID (original admin)
-          if (ctx.from.id.toString() === adminId) {
-            const adminUser = {
-              telegramId: ctx.from.id.toString(),
-              username: ctx.from?.username || 'fuck_sake',
-              firstName: ctx.from?.first_name || 'Admin',
-              lastName: ctx.from?.last_name || '',
-              isAdmin: true,
-              isApproved: true,
-              credits: 999999,
-              isPremium: true,
-              totalQueries: 0,
-              registrationDate: new Date()
-            };
-            users.set(ctx.from.id.toString(), adminUser);
-            await sendFormattedMessage(ctx, '✅ Admin account synced successfully!');
-          } else {
-            // Note: Made admins need to be manually restored by original admin if bot restarts
-            await sendFormattedMessage(ctx, '❌ No approved registration found.\n\n📋 If you were made admin but lost access:\n• Contact the original admin (@fuck_sake)\n• Or use /register to submit new request\n\n💡 Made admins lose access if bot restarts - this is normal for security.');
-          }
-        }
-        break;
-        
-      default:
-        await sendFormattedMessage(ctx, '❌ Unknown tool. Please try again.');
-    }
-  } catch (error) {
-    console.error(`Error executing ${tool}:`, error);
-    
-    // Refund credit on error for tools that require credits
-    if (['ip', 'email', 'num', 'basicnum', 'paknum', 'ig', 'bin', 'vehicle', 'ff', 'dl', 'snap', 'insta', 'pin', 'fb', 'terabox'].includes(tool)) {
-      user.credits += 1;
-      await sendFormattedMessage(ctx, `❌ An error occurred while processing your request.\n💳 1 credit refunded`);
-    } else {
-      await sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
-    }
-  }
-}
-
-// ===============================
-// MESSAGE HANDLER FOR TOOL INPUTS
-// ===============================
-bot.on('message:text', async (ctx) => {
-  const userId = ctx.from?.id.toString();
-  const userState = userStates.get(userId);
-  
-  // If user is waiting for input for a tool
-  if (userState && userState.waitingForInput) {
-    const tool = userState.tool;
-    const input = ctx.message.text;
-    
-    // Clear user state
-    userStates.delete(userId);
-    
-    // Execute the tool with the provided input
-    await executeTool(ctx, tool, input);
-    return;
-  }
-  
-  // If not waiting for input, check if it's a command
-  if (ctx.message.text.startsWith('/')) {
-    return; // Let command handlers process it
-  }
-  
-  // Otherwise, ignore the message
-});
-
-// ===============================
 // START COMMAND
 // ===============================
 bot.command('start', async (ctx) => {
@@ -1555,9 +775,48 @@ Your account is pending approval by our admin team.
 
 ✨ Your Ultimate Open Source Intelligence Assistant ✨
 
-🎯 Choose from our menu below or use commands directly:`;
+🔍 Advanced Lookup Tools:
+• /ip <address> - IP intelligence
+• /email <email> - Email validation
+• /num <number> - Phone number lookup
+• /basicnum <number> - Basic number information
+• /paknum <number> - Pakistani government number lookup
+• /ig <username> - Instagram intelligence
+• /bin <number> - BIN lookup
+• /vehicle <number> - Vehicle details
+• /ff <uid> - Free Fire stats
 
-  await ctx.reply(welcomeMessage, { reply_markup: createMainMenu() });
+📱 Social Media Video Downloaders:
+• /dl <url> - Universal video downloader (auto-detects platform)
+• /snap <url> - Snapchat video downloader
+• /insta <url> - Instagram video downloader
+• /pin <url> - Pinterest video downloader
+• /fb <url> - Facebook video downloader
+• /terabox <url> - TeraBox video downloader
+
+📊 System Commands:
+• /myip - Your IP information
+• /useragent - Browser info
+• /tempmail - Temporary email
+• /stats - Bot statistics
+• /credits - Your credits
+• /checkstatus - Check registration status
+• /sync - Sync registration (if approved but lost access)
+• /help - Show this help message
+
+💎 Premium Features:
+ ${user.isPremium ? '✅ Unlimited queries' : '🔒 Upgrade for unlimited queries'}
+ ${user.isPremium ? '✅ Priority API access' : '🔒 Priority processing'}
+ ${user.isPremium ? '✅ Advanced tools' : '🔒 Advanced features'}
+ ${user.isPremium ? '✅ 24/7 support' : '🔒 Premium support'}
+
+💳 Your Credits: ${user.credits} 🪙
+
+⚡ Powered by Advanced AI Technology ⚡
+
+🛡️ Educational Purpose Only - Use Responsibly 🛡️`;
+
+  await sendFormattedMessage(ctx, welcomeMessage);
 });
 
 // Registration command - Fixed to check Telegram API directly
@@ -1976,7 +1235,34 @@ bot.command('ip', async (ctx) => {
   }
 
   const ip = ctx.match || 'self';
-  await executeTool(ctx, 'ip', ip);
+  await sendFormattedMessage(ctx, '🔍 Fetching IP intelligence...');
+
+  try {
+    const result = await getIpInfo(ip === 'self' ? undefined : ip.toString());
+    
+    if (result.success && result.data) {
+      const response = `🌐 IP Intelligence Results 🌐
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 IP information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please check the IP address and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in ip command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching IP information.\n💳 1 credit refunded');
+  }
 });
 
 bot.command('email', async (ctx) => {
@@ -1998,7 +1284,34 @@ bot.command('email', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'email', email);
+  await sendFormattedMessage(ctx, '🔍 Validating email address...');
+
+  try {
+    const result = await validateEmail(email.toString());
+    
+    if (result.success && result.data) {
+      const response = `📧 Email Validation Results 📧
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Email validation for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to validate email address. Please check the email and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in email command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while validating email address.\n💳 1 credit refunded');
+  }
 });
 
 bot.command('num', async (ctx) => {
@@ -2020,7 +1333,34 @@ bot.command('num', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'num', number);
+  await sendFormattedMessage(ctx, '🔍 Looking up phone number...');
+
+  try {
+    const result = await getPhoneNumberInfo(number.toString());
+    
+    if (result.success && result.data) {
+      const response = `📱 Phone Number Lookup Results 📱
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Phone number information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to lookup phone number. Please check the number and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in num command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up phone number.\n💳 1 credit refunded');
+  }
 });
 
 bot.command('basicnum', async (ctx) => {
@@ -2042,9 +1382,37 @@ bot.command('basicnum', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'basicnum', number);
+  await sendFormattedMessage(ctx, '🔍 Getting basic number information...');
+
+  try {
+    const result = await getBasicNumberInfo(number.toString());
+    
+    if (result.success && result.data) {
+      const response = `📱 Basic Number Information 📱
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Basic number information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to get basic number information. Please check the number and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in basicnum command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while getting basic number information.\n💳 1 credit refunded');
+  }
 });
 
+// UPDATED: Pakistani Government Number Information command
 bot.command('paknum', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
@@ -2064,7 +1432,46 @@ bot.command('paknum', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'paknum', number);
+  await sendFormattedMessage(ctx, '🔍 Looking up Pakistani government number information...');
+
+  try {
+    const result = await getPakistaniGovtNumberInfo(number.toString());
+    
+    if (result.success && result.data && result.data.length > 0) {
+      // Format the results as JSON with colored formatting
+      const formattedResults = result.data.map((record, index) => ({
+        [`Record #${index + 1}`]: {
+          name: record.name || 'N/A',
+          number: record.n || 'N/A',
+          cnic: record.cnic || 'N/A',
+          address: record.address || 'N/A'
+        }
+      }));
+      
+      const response = `📱 Pakistani Government Number Information 📱
+
+🔍 Found ${result.count} record(s) for: ${number}
+
+\`\`\`json
+ ${JSON.stringify(formattedResults, null, 2)}
+\`\`\`
+
+💡 Information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'No records found for the provided number or CNIC'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in paknum command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani government number information.\n💳 1 credit refunded');
+  }
 });
 
 bot.command('ig', async (ctx) => {
@@ -2086,7 +1493,34 @@ bot.command('ig', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'ig', username);
+  await sendFormattedMessage(ctx, '🔍 Fetching Instagram intelligence...');
+
+  try {
+    const result = await getInstagramInfo(username.toString());
+    
+    if (result.success && result.data) {
+      const response = `📷 Instagram Intelligence Results 📷
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Instagram information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch Instagram information. Please check the username and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in ig command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Instagram information.\n💳 1 credit refunded');
+  }
 });
 
 bot.command('bin', async (ctx) => {
@@ -2108,7 +1542,34 @@ bot.command('bin', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'bin', bin);
+  await sendFormattedMessage(ctx, '🔍 Looking up BIN information...');
+
+  try {
+    const result = await getBinInfo(bin.toString());
+    
+    if (result.success && result.data) {
+      const response = `💳 BIN Lookup Results 💳
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 BIN information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to lookup BIN information. Please check the BIN and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in bin command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up BIN information.\n💳 1 credit refunded');
+  }
 });
 
 bot.command('vehicle', async (ctx) => {
@@ -2130,7 +1591,34 @@ bot.command('vehicle', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'vehicle', vehicle);
+  await sendFormattedMessage(ctx, '🔍 Fetching vehicle details...');
+
+  try {
+    const result = await getVehicleInfo(vehicle.toString());
+    
+    if (result.success && result.data) {
+      const response = `🚗 Vehicle Details Results 🚗
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Vehicle information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch vehicle details. Please check the vehicle number and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in vehicle command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching vehicle details.\n💳 1 credit refunded');
+  }
 });
 
 bot.command('ff', async (ctx) => {
@@ -2152,7 +1640,34 @@ bot.command('ff', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'ff', uid);
+  await sendFormattedMessage(ctx, '🔍 Fetching Free Fire statistics...');
+
+  try {
+    const result = await getFreeFireStats(uid.toString());
+    
+    if (result.success && result.data) {
+      const response = `🎮 Free Fire Statistics Results 🎮
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Free Fire statistics for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch Free Fire statistics. Please check the UID and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in ff command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Free Fire statistics.\n💳 1 credit refunded');
+  }
 });
 
 bot.command('myip', async (ctx) => {
@@ -2162,7 +1677,44 @@ bot.command('myip', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'myip', null);
+  await sendFormattedMessage(ctx, '🔍 Fetching your IP information...');
+
+  try {
+    const result = await getIpInfo();
+    
+    if (result.success && result.data) {
+      const ip = result.data.ip || 'Unknown';
+      const city = result.data.city || 'Unknown';
+      const region = result.data.region || 'Unknown';
+      const country = result.data.country || 'Unknown';
+      const org = result.data.org || 'Unknown';
+      const timezone = result.data.timezone || 'Unknown';
+
+      const response = `🌐 Your IP Information 🌐
+
+📍 Location Details:
+• IP Address: \`${ip}\`
+• City: ${city}
+• Region: ${region}
+• Country: ${country}
+• Organization: ${org}
+• Timezone: ${timezone}
+
+🔍 Network Information:
+• ISP: ${org}
+• Connection Type: Detected
+
+💡 This information is for educational purposes only`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please try again.');
+    }
+  } catch (error) {
+    console.error('Error in myip command:', error);
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching IP information.');
+  }
 });
 
 bot.command('useragent', async (ctx) => {
@@ -2172,7 +1724,31 @@ bot.command('useragent', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'useragent', null);
+  try {
+    const result = getUserAgentInfo();
+    
+    if (result.success && result.data) {
+      const response = `🖥️ Browser & System Information 🖥️
+
+🌐 Browser Details:
+• Browser: ${result.data.browser}
+• Version: ${result.data.version}
+• Platform: ${result.data.platform}
+• Mobile: ${result.data.mobile ? 'Yes' : 'No'}
+
+📱 User Agent String:
+\`${result.data.user_agent}\`
+
+💡 This is the bot's user agent information`;
+
+      await sendFormattedMessage(ctx, response);
+    } else {
+      await sendFormattedMessage(ctx, '❌ Failed to fetch user agent information.');
+    }
+  } catch (error) {
+    console.error('Error in useragent command:', error);
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching user agent information.');
+  }
 });
 
 bot.command('tempmail', async (ctx) => {
@@ -2182,7 +1758,36 @@ bot.command('tempmail', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'tempmail', null);
+  try {
+    const result = generateTempEmail();
+    
+    if (result.success && result.data) {
+      const response = `📧 Temporary Email Generated 📧
+
+🔑 Email Address:
+\`${result.data.email}\`
+
+⏰ Details:
+• Expires in: ${result.data.expires_in}
+• Domain: ${result.data.domain}
+
+💡 Important Notes:
+• This email will expire automatically
+• Use for temporary registrations only
+• Don't use for important communications
+• Check the inbox regularly
+
+🔒 Privacy protected - No logs stored`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      await sendFormattedMessage(ctx, '❌ Failed to generate temporary email.');
+    }
+  } catch (error) {
+    console.error('Error in tempmail command:', error);
+    await sendFormattedMessage(ctx, '❌ An error occurred while generating temporary email.');
+  }
 });
 
 bot.command('stats', async (ctx) => {
@@ -2192,7 +1797,21 @@ bot.command('stats', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'stats', null);
+  const response = `📊 Your Usage Statistics 📊
+
+👤 Account Information:
+• Username: @${user.username || 'N/A'}
+• Status: ${user.isPremium ? '💎 Premium' : '🔹 Standard'}
+• Credits: ${user.credits} 🪙
+• Member Since: ${user.registrationDate.toLocaleDateString()}
+
+📈 Usage Statistics:
+• Total Queries: ${user.totalQueries}
+• Credits Available: ${user.credits}
+
+💎 ${user.isPremium ? 'Premium Member - Unlimited Access!' : 'Upgrade to Premium for unlimited queries!'}`;
+
+  await sendFormattedMessage(ctx, response);
 });
 
 bot.command('credits', async (ctx) => {
@@ -2202,25 +1821,25 @@ bot.command('credits', async (ctx) => {
     return;
   }
 
-  await executeTool(ctx, 'credits', null);
-});
+  const response = `💳 Credit Information 💳
 
-// Check registration status command
-bot.command('checkstatus', async (ctx) => {
-  const telegramId = ctx.from?.id.toString();
-  
-  if (!telegramId) return;
+🪙 Current Balance: ${user.credits} credits
 
-  await executeTool(ctx, 'checkstatus', null);
-});
+👤 Account Status:
+ ${user.isPremium ? '💎 Premium Member' : '🔹 Standard Member'}
+ ${user.isPremium ? '✅ Unlimited queries' : `📊 Daily limit: ${user.credits} queries`}
 
-// Sync registration command (for users who were approved but lost data)
-bot.command('sync', async (ctx) => {
-  const telegramId = ctx.from?.id.toString();
-  
-  if (!telegramId) return;
+📈 Usage Statistics:
+• Total Queries: ${user.totalQueries}
+• Credits Available: ${user.credits}
 
-  await executeTool(ctx, 'sync', null);
+🎁 Want more credits?
+• Upgrade to Premium for unlimited access
+• Contact admin for credit requests
+
+💡 Each query consumes 1 credit`;
+
+  await sendFormattedMessage(ctx, response);
 });
 
 // Help command
@@ -2262,12 +1881,11 @@ bot.command('help', async (ctx) => {
 • /sync - Sync registration (if approved but lost access)
 
 💎 Premium Benefits:
- ${getOrCreateUser(ctx)?.isPremium ? '✅ Unlimited queries' : '🔒 Upgrade for unlimited queries'}
- ${getOrCreateUser(ctx)?.isPremium ? '✅ Priority API access' : '🔒 Priority processing'}
- ${getOrCreateUser(ctx)?.isPremium ? '✅ Advanced tools' : '🔒 Advanced features'}
- ${getOrCreateUser(ctx)?.isPremium ? '✅ 24/7 support' : '🔒 Premium support'}
-
-💳 Your Credits: ${getOrCreateUser(ctx)?.credits || 0} 🪙
+• 🔄 Unlimited queries per day
+• ⚡ Priority API access
+• 🔧 Advanced lookup tools
+• 📞 24/7 premium support
+• 🎯 Higher rate limits
 
 📝 Usage Examples:
 • /ip 8.8.8.8
@@ -3918,6 +3536,85 @@ bot.command('backup', async (ctx) => {
   }
 });
 
+// Check registration status command
+bot.command('checkstatus', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId) return;
+
+  // Check if user exists in users map
+  const user = users.get(telegramId);
+  if (user) {
+    const statusMessage = `📋 Your Registration Status 📋
+
+👤 Account Information:
+• Telegram ID: ${telegramId}
+• Username: @${user.username || 'N/A'}
+• Status: ${user.isApproved ? '✅ Approved' : '❌ Not Approved'}
+• Credits: ${user.credits} 🪙
+• Premium: ${user.isPremium ? '💎 Yes' : '🔹 No'}
+
+📅 Registration Date: ${user.registrationDate.toLocaleDateString()}
+
+ ${!user.isApproved ? '\n⏳ Your account is pending approval. Please wait for the admin to review your request.' : '\n✅ Your account is approved and ready to use!'}`;
+
+    await sendFormattedMessage(ctx, statusMessage);
+  } else {
+    // Check if there's a pending registration request
+    const request = registrationRequests.get(telegramId);
+    if (request) {
+      await sendFormattedMessage(ctx, '⏳ Your registration is pending approval.\n\nPlease wait for the admin to review your request.');
+    } else {
+      // Check if user has verified channel membership
+      if (verifiedUsers.has(telegramId)) {
+        await sendFormattedMessage(ctx, '✅ You have verified your channel membership! You can now proceed with registration using /register.');
+      } else {
+        // Create inline keyboard with join and verify buttons
+        const keyboard = new InlineKeyboard()
+          .url("📢 Join Updates Channel", CHANNEL_URL)
+          .text("✅ Verify Membership", `verify_${telegramId}`);
+        
+        await sendFormattedMessage(ctx, '❌ No registration found.\n\nPlease join the updates channel and verify your membership before registering.', keyboard);
+      }
+    }
+  }
+});
+
+// Sync registration command (for users who were approved but lost data)
+bot.command('sync', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId) return;
+
+  const user = users.get(telegramId);
+  if (user && user.isApproved) {
+    await sendFormattedMessage(ctx, '✅ Your account is already synced and approved!');
+    return;
+  }
+
+  // Auto-approve if admin ID (original admin)
+  if (telegramId === adminId) {
+    const adminUser = {
+      telegramId,
+      username: ctx.from?.username || 'fuck_sake',
+      firstName: ctx.from?.first_name || 'Admin',
+      lastName: ctx.from?.last_name || '',
+      isAdmin: true,
+      isApproved: true,
+      credits: 999999,
+      isPremium: true,
+      totalQueries: 0,
+      registrationDate: new Date()
+    };
+    users.set(telegramId, adminUser);
+    await sendFormattedMessage(ctx, '✅ Admin account synced successfully!');
+    return;
+  }
+
+  // Note: Made admins need to be manually restored by original admin if bot restarts
+  await sendFormattedMessage(ctx, '❌ No approved registration found.\n\n📋 If you were made admin but lost access:\n• Contact the original admin (@fuck_sake)\n• Or use /register to submit new request\n\n💡 Made admins lose access if bot restarts - this is normal for security.');
+});
+
 // ===============================
 // SAMPLE PROTECTED COMMAND
 // ===============================
@@ -3985,7 +3682,6 @@ bot.start().then(() => {
   console.log('🔧 Real maintenance mode functionality is now active!');
   console.log('📢 Channel membership verification is now active!');
   console.log('🇵🇰 Updated Pakistani government number lookup with new API endpoint!');
-  console.log('🎮 Interactive menu system with callback buttons is now active!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
