@@ -1,7 +1,5 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 
 // Load environment variables
 require('dotenv').config();
@@ -36,9 +34,6 @@ const registrationRequests = new Map();
 const verifiedUsers = new Set(); // Track users who have verified channel membership
 const registeredUsers = new Set(); // Track users who have completed registration
 const adminId = process.env.ADMIN_USER_ID;
-
-// UPI QR code sessions storage
-const upiSessions = new Map();
 
 // Maintenance mode flag (stored in memory, will reset on bot restart)
 let maintenanceMode = false;
@@ -240,40 +235,6 @@ async function getPakistaniGovtNumberInfo(number) {
     return { 
       success: false, 
       error: 'Failed to fetch Pakistani government number information' 
-    };
-  }
-}
-
-// FIXED: UPI QR Code Generation API
-async function generateUpiQrCode(upiId, amount) {
-  try {
-    const upiString = `upi://pay?pa=${upiId}&pn=box&am=${amount}&cu=INR`;
-    const encodedUpi = encodeURIComponent(upiString);
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodedUpi}`;
-    
-    // Get the image as a buffer
-    const response = await axios.get(qrUrl, { responseType: 'arraybuffer' });
-    
-    if (response.status === 200) {
-      // Save to a temporary file
-      const tempFilePath = path.join(__dirname, 'temp_qr.png');
-      fs.writeFileSync(tempFilePath, response.data);
-      
-      return {
-        success: true,
-        data: tempFilePath // Return the file path instead of buffer
-      };
-    } else {
-      return {
-        success: false,
-        error: 'Failed to generate QR code'
-      };
-    }
-  } catch (error) {
-    console.error('Error generating UPI QR code:', error);
-    return {
-      success: false,
-      error: 'Failed to generate QR code'
     };
   }
 }
@@ -676,25 +637,16 @@ function isAdmin(userId) {
 }
 
 // Helper function to send formatted messages
-async function sendFormattedMessage(ctx, text, keyboard) {
+async function sendFormattedMessage(ctx, text) {
   try {
-    if (keyboard) {
-      await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard });
-    } else {
-      await ctx.reply(text, { parse_mode: 'Markdown' });
-    }
+    await ctx.reply(text, { parse_mode: 'Markdown' });
   } catch (error) {
     const plainText = text
       .replace(/\*\*(.*?)\*\*/g, '$1')
       .replace(/\*(.*?)\*/g, '$1')
       .replace(/`(.*?)`/g, '$1')
       .replace(/```(.*?)```/gs, '$1');
-    
-    if (keyboard) {
-      await ctx.reply(plainText, { reply_markup: keyboard });
-    } else {
-      await ctx.reply(plainText);
-    }
+    await ctx.reply(plainText);
   }
 }
 
@@ -841,9 +793,6 @@ Your account is pending approval by our admin team.
 • /pin <url> - Pinterest video downloader
 • /fb <url> - Facebook video downloader
 • /terabox <url> - TeraBox video downloader
-
-💳 Payment Tools:
-• /upi - Generate UPI payment QR codes
 
 📊 System Commands:
 • /myip - Your IP information
@@ -1068,159 +1017,6 @@ Processed by: @${ctx.from?.username || 'Admin'}`);
 🎯 Status: Rejected
 
 Processed by: @${ctx.from?.username || 'Admin'}`);
-  }
-});
-
-// FIXED: UPI QR Code Generation Command
-bot.command('upi', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    return sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-  }
-
-  // Check credits
-  if (!deductCredits(user)) {
-    return sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
-  }
-
-  // Start UPI collection process
-  const userId = ctx.from.id.toString();
-  
-  // Check if user already has an active session
-  if (upiSessions.has(userId)) {
-    return sendFormattedMessage(ctx, '⚠️ You already have an active UPI session. Please complete it before starting a new one.');
-  }
-
-  // Create a new session
-  upiSessions.set(userId, {
-    step: 'upi_id',
-    upiId: null,
-    amount: null
-  });
-
-  // Send initial message asking for UPI ID
-  const keyboard = new InlineKeyboard()
-    .text("❌ Cancel", "cancel_upi");
-
-  await sendFormattedMessage(ctx, 
-    '💳 UPI QR Code Generator 💳\n\n' +
-    'Please enter your UPI ID (e.g., yourname@ybl or 9876543210@paytm)\n\n' +
-    '⚠️ This is for educational purposes only. Use responsibly.',
-    keyboard
-  );
-});
-
-// FIXED: Handle text messages for UPI collection
-bot.on('message:text', async (ctx) => {
-  const userId = ctx.from.id.toString();
-  const messageText = ctx.message.text.trim();
-  
-  // Check if user has an active UPI session
-  if (!upiSessions.has(userId)) {
-    return; // No active session, ignore
-  }
-
-  const session = upiSessions.get(userId);
-  const user = getOrCreateUser(ctx); // Get user here to ensure it's available in error handling
-  
-  // Handle cancellation
-  if (messageText.toLowerCase() === 'cancel' || ctx.callbackQuery?.data === 'cancel_upi') {
-    upiSessions.delete(userId);
-    return sendFormattedMessage(ctx, '❌ UPI QR generation cancelled.');
-  }
-
-  // Process based on current step
-  if (session.step === 'upi_id') {
-    // Validate UPI ID format (basic validation)
-    if (!messageText.includes('@') || messageText.length < 5) {
-      return sendFormattedMessage(ctx, '❌ Invalid UPI ID format. Please enter a valid UPI ID (e.g., yourname@ybl or 9876543210@paytm).');
-    }
-
-    // Update session with UPI ID
-    session.upiId = messageText;
-    session.step = 'amount';
-    
-    // Ask for amount
-    const keyboard = new InlineKeyboard()
-      .text("❌ Cancel", "cancel_upi");
-    
-    return sendFormattedMessage(ctx, 
-      `💳 UPI ID received: ${messageText}\n\n` +
-      'Now please enter the amount (INR) you want to receive.\n\n' +
-      '⚠️ This is for educational purposes only. Use responsibly.',
-      keyboard
-    );
-  } 
-  else if (session.step === 'amount') {
-    // Validate amount (basic validation)
-    const amount = parseFloat(messageText);
-    if (isNaN(amount) || amount <= 0) {
-      return sendFormattedMessage(ctx, '❌ Invalid amount. Please enter a valid amount in INR.');
-    }
-
-    // Update session with amount
-    session.amount = amount;
-    
-    // Generate QR code
-    await sendFormattedMessage(ctx, '⏳ Generating UPI QR code...');
-    
-    try {
-      const result = await generateUpiQrCode(session.upiId, amount);
-      
-      if (result.success) {
-        // Create inline keyboard with developer and channel links
-        const keyboard = new InlineKeyboard()
-          .url("Developer", "https://t.me/ankucode")
-          .url("Channel", "https://t.me/trybyte");
-        
-        // Send QR code image with caption and inline keyboard
-        await ctx.replyWithPhoto(
-          { source: result.data }, // Use the file path
-          {
-            caption: `💳 UPI Payment QR Code 💳\n\n` +
-                    `UPI ID: ${session.upiId}\n` +
-                    `Amount: ₹${amount}\n\n` +
-                    `Here is your payment QR code. Send this QR to receive money.\n\n` +
-                    `⚠️ This is for educational purposes only. Use responsibly.`,
-            reply_markup: keyboard
-          }
-        );
-        
-        // Clean up the temporary file
-        try {
-          fs.unlinkSync(result.data);
-        } catch (err) {
-          console.error('Error cleaning up temporary file:', err);
-        }
-        
-        // Clear the session
-        upiSessions.delete(userId);
-      } else {
-        // Refund credit on failure
-        user.credits += 1;
-        await sendFormattedMessage(ctx, `❌ Failed to generate QR code: ${result.error}\n💳 1 credit refunded`);
-        upiSessions.delete(userId);
-      }
-    } catch (error) {
-      console.error('Error generating UPI QR code:', error);
-      // Refund credit on error
-      user.credits += 1;
-      await sendFormattedMessage(ctx, '❌ An error occurred while generating QR code.\n💳 1 credit refunded');
-      upiSessions.delete(userId);
-    }
-  }
-});
-
-// FIXED: Handle callback queries for cancel button
-bot.callbackQuery('cancel_upi', async (ctx) => {
-  const userId = ctx.from.id.toString();
-  
-  if (upiSessions.has(userId)) {
-    upiSessions.delete(userId);
-    await ctx.answerCallbackQuery('UPI QR generation cancelled.');
-    await ctx.editMessageText('❌ UPI QR generation cancelled.');
-  } else {
-    await ctx.answerCallbackQuery('No active UPI session to cancel.');
   }
 });
 
@@ -1642,7 +1438,7 @@ bot.command('paknum', async (ctx) => {
     const result = await getPakistaniGovtNumberInfo(number.toString());
     
     if (result.success && result.data && result.data.length > 0) {
-      // Format results as JSON with colored formatting
+      // Format the results as JSON with colored formatting
       const formattedResults = result.data.map((record, index) => ({
         [`Record #${index + 1}`]: {
           name: record.name || 'N/A',
@@ -2067,9 +1863,6 @@ bot.command('help', async (ctx) => {
 • /vehicle <number> - Vehicle registration details
 • /ff <uid> - Free Fire player statistics
 
-💳 Payment Tools:
-• /upi - Generate UPI payment QR codes
-
 📱 Social Media Video Downloaders:
 • /dl <url> - Universal video downloader (auto-detects platform)
 • /snap <url> - Snapchat video downloader
@@ -2105,7 +1898,6 @@ bot.command('help', async (ctx) => {
 • /snap https://snapchat.com/t/H2D8zTxt
 • /pin https://pin.it/4gsJMxtt1
 • /fb https://www.facebook.com/reel/1157396829623170/
-• /upi - Start UPI QR code generation
 
 ⚠️ Important Notes:
 • Each query consumes 1 credit
@@ -3844,7 +3636,7 @@ bot.command('test', async (ctx) => {
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ Bot is working! 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /paknum 03005854962\n• /myip\n• /upi - Generate UPI QR codes\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ Bot is working! 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /paknum 03005854962\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
 });
 
 // Error handling with conflict resolution
@@ -3876,33 +3668,20 @@ process.on('SIGTERM', () => {
 });
 
 // ===============================
-// START BOT WITH IMPROVED ERROR HANDLING
+// START BOT
 // ===============================
 console.log('🚀 Starting Premium OSINT Bot with Complete Admin Panel & Registration Management...');
 console.log(`🤖 Bot Username: @OsintShit_Bot`);
 console.log(`👑 Admin ID: ${adminId}`);
 console.log('📡 Starting polling...');
 
-// Start bot with better error handling
-bot.start({
-  onStart: () => {
-    console.log('✅ Bot is now running and polling for updates!');
-    console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
-    console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
-    console.log('🔧 Real maintenance mode functionality is now active!');
-    console.log('📢 Channel membership verification is now active!');
-    console.log('🇵🇰 Updated Pakistani government number lookup with new API endpoint!');
-    console.log('💳 UPI QR code generation feature is now active!');
-  },
-  onError: (error) => {
-    console.error('❌ Failed to start bot:', error);
-    
-    // If it's a conflict error, exit gracefully
-    if (error.code === 409) {
-      console.log('⚠️ Another bot instance is running. Exiting to prevent conflicts...');
-      process.exit(0);
-    }
-  }
+bot.start().then(() => {
+  console.log('✅ Bot is now running and polling for updates!');
+  console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
+  console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
+  console.log('🔧 Real maintenance mode functionality is now active!');
+  console.log('📢 Channel membership verification is now active!');
+  console.log('🇵🇰 Updated Pakistani government number lookup with new API endpoint!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
