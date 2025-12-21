@@ -433,20 +433,25 @@ async function handleTeraBox(ctx, url) {
       const title = item.title || item.name || `TeraBox Video ${i + 1}`;
       const size = item.size || "Unknown";
       const channel = item.Channel || item.channel || "";
-      
+
       // ✅ Full info message (like your screenshot)
       const msg =
         `📦 *TeraBox Video ${i + 1}/${videos.length}*\n\n` +
         `*Title:* \`${escapeMd(title)}\`\n` +
         `*Size:* \`${escapeMd(size)}\`\n` +
         (channel ? `*Channel:* \`${escapeMd(channel)}\`\n` : "") +
-        `\n*Download:* \n${downloadUrl}`;
+        `\n⚠️ If link doesn't open, refresh once (normal).`;
 
-      // small delay to avoid flood
+      // ✅ Button style download
+      const keyboard = new InlineKeyboard().url("⬇️ Download", downloadUrl);
+
       if (i > 0) await new Promise((r) => setTimeout(r, 1200));
 
-      // send as text with info (always works)
-      await ctx.reply(msg, { parse_mode: "Markdown" });
+      await ctx.reply(msg, {
+        parse_mode: "Markdown",
+        reply_markup: keyboard,
+        disable_web_page_preview: true,
+      });
     }
     
     return true;
@@ -2591,7 +2596,7 @@ bot.command('approve', async (ctx) => {
   user.credits = 25;
   users.set(targetUserId, user);
   registrationRequests.delete(targetUserId);
-  registeredUsers.add(targetUserId);
+    registeredUsers.add(targetUserId);
 
   const userMessage = `🎉 Registration Approved! 🎉
 
@@ -2777,7 +2782,7 @@ bot.command('adminstats', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
   if (!telegramId || !isAdmin(telegramId)) {
-    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    await sendFormattedMessage(ctx, '❌ This command is - This command is only available to administrators.');
     return;
   }
 
@@ -2817,7 +2822,7 @@ bot.command('adminstats', async (ctx) => {
 bot.command('activity', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !isAdmin(telegramId)) {
+  if (!telegramId || !isAdmin( telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2839,7 +2844,7 @@ bot.command('activity', async (ctx) => {
 📊 Activity Summary:
 • Total Active Users: ${recentUsers.length}
 • Total Queries: ${recentUsers.reduce((sum, u) => sum + u.totalQueries, 0)}
-• Average Queries: ${recentUsers.length > 0 ? (recentUsers.reduce((sum, u) => sum + u.totalQueries, 0) / recentUsers.length).toFixed(1) : 0}
+• Average Queries: ${recentUsers.length > 0 ? (recentUsers.reduce((sum, u) => sum + u.totalQueries, 0) / recentUsers.length).toFixed(1) : 0)}
 
 🔄 Real-time activity monitoring`;
 
@@ -2978,7 +2983,7 @@ bot.command('announce', async (ctx) => {
 • Total Users: ${approvedUsers.length}
 • Successful: ${successCount}
 • Failed: ${failCount}
-• Success Rate: ${approvedUsers.length > 0 ? ((successCount / approvedUsers.length) * 100).toFixed(1) : 0}%
+• Success Rate: ${approvedUsers.length > 0 ? ((successCount / approvedUsers.length) * 100).toFixed(1) : 0)%
 
 📝 Announcement Details:
 • Title: ${title.trim()}
@@ -3262,8 +3267,6 @@ bot.command('removepremium', async (ctx) => {
 • Action: Premium access removed
 • Admin: @${ctx.from?.username}
 
-🎯 User has been notified about the premium status change`;
-
   await sendFormattedMessage(ctx, adminMessage);
 });
 
@@ -3272,7 +3275,7 @@ bot.command('reset_daily', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
   if (!telegramId || !isAdmin(telegramId)) {
-    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    await sendFormattedMessage(ctx, '❌ This command is only available to await telegramId || !isAdmin(telegramId)) {
     return;
   }
 
@@ -3350,8 +3353,8 @@ bot.command('resetuser', async (ctx) => {
 • Username: @${targetUser.username || 'N/A'}
 • Old Credits: ${oldCredits}
 • Old Queries: ${oldQueries}
-• Was Premium: ${wasPremium ? 'Yes' : 'No'}
-• Admin Status: ${wasAdmin ? 'Yes (unchanged)' : 'No'}
+• Was Premium: ${wasPremium ? 'Yes → No' : 'No'}
+• Admin: ${wasAdmin ? 'Yes (unchanged)' : 'No'}
 • Admin: @${ctx.from?.username}
 
 🎯 User has been notified about the account reset`;
@@ -3508,7 +3511,6 @@ bot.command('checkstatus', async (ctx) => {
         await sendFormattedMessage(ctx, '❌ No registration found.\n\nPlease join the updates channel and verify your membership before registering.', keyboard);
       }
     }
-  }
 });
 
 // Sync registration command (for users who were approved but lost data)
@@ -3608,10 +3610,10 @@ console.log('📡 Starting polling...');
 
 bot.start().then(() => {
   console.log('✅ Bot is now running and polling for updates!');
-  console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
-  console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
-  console.log('🔧 Real maintenance mode functionality is now active!');
-  console.log('📢 Channel membership verification is now active!');
+    console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
+    console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
+    console.log('🔧 Real maintenance mode functionality is now active!');
+    console.log('📢 Channel membership verification is now active!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
