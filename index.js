@@ -19,7 +19,11 @@ const bot = new Bot(botToken);
 // In-memory storage
 const users = new Map();
 const registrationRequests = new Map();
+const verifiedUsers = new Set(); // Track users who have verified channel membership
 const adminId = process.env.ADMIN_USER_ID;
+
+// Channel to join for verification
+const verificationChannel = '@OsintShitUpdates';
 
 // Maintenance mode flag (stored in memory, will reset on bot restart)
 let maintenanceMode = false;
@@ -47,6 +51,17 @@ users.set(adminId, {
   totalQueries: 0,
   registrationDate: new Date()
 });
+
+// Function to check if user is a member of the verification channel
+async function checkChannelMembership(userId) {
+  try {
+    const chatMember = await bot.api.getChatMember(verificationChannel, userId);
+    return ['member', 'administrator', 'creator'].includes(chatMember.status);
+  } catch (error) {
+    console.error('Error checking channel membership:', error);
+    return false;
+  }
+}
 
 // API Functions
 async function getIpInfo(ip) {
@@ -588,7 +603,9 @@ bot.command('start', async (ctx) => {
 
 Your account is pending approval by our admin team. 
 
-🔹 Use /register to submit your registration request
+🔹 Join ${verificationChannel} to get started
+🔹 Use /verify to confirm you've joined
+🔹 Then use /register to submit your registration request
 🔹 You'll be notified once approved
 🔹 Premium features will be available after approval
 
@@ -596,7 +613,11 @@ Your account is pending approval by our admin team.
 
 🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
 
-    await sendFormattedMessage(ctx, welcomeMessage);
+    // Create inline keyboard with join button
+    const keyboard = new InlineKeyboard()
+      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`);
+
+    await ctx.reply(welcomeMessage, { reply_markup: keyboard });
     return;
   }
 
@@ -646,6 +667,269 @@ Your account is pending approval by our admin team.
 🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
 
   await sendFormattedMessage(ctx, welcomeMessage);
+});
+
+// Verify command to check if user has joined the channel
+bot.command('verify', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId) return;
+
+  // Check if user is already verified
+  if (verifiedUsers.has(telegramId)) {
+    await sendFormattedMessage(ctx, '✅ *You have already verified your channel membership!* You can now proceed with registration using /register.');
+    return;
+  }
+
+  // Check if user is a member of the verification channel
+  const isMember = await checkChannelMembership(telegramId);
+  
+  if (isMember) {
+    verifiedUsers.add(telegramId);
+    await sendFormattedMessage(ctx, '✅ *Verification successful!* You have joined the updates channel. You can now proceed with registration using /register.');
+  } else {
+    // Create inline keyboard with join button
+    const keyboard = new InlineKeyboard()
+      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`);
+    
+    await sendFormattedMessage(ctx, `❌ *Verification failed!* You need to join ${verificationChannel} before you can register.\n\nPlease join the channel and try /verify again.`, keyboard);
+  }
+});
+
+// Registration command
+bot.command('register', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  const username = ctx.from?.username;
+  const firstName = ctx.from?.first_name;
+  const lastName = ctx.from?.last_name;
+
+  if (!telegramId) return;
+
+  // Check if user has verified channel membership
+  if (!verifiedUsers.has(telegramId)) {
+    // Create inline keyboard with join and verify buttons
+    const keyboard = new InlineKeyboard()
+      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+      .text("✅ Verify Membership", `verify_${telegramId}`);
+
+    await sendFormattedMessage(ctx, `❌ *Channel membership required!* You must join ${verificationChannel} and verify your membership before registering.\n\nPlease join the channel and click the "Verify Membership" button below.`, keyboard);
+    return;
+  }
+
+  const user = users.get(telegramId);
+  
+  if (user && user.isApproved) {
+    await sendFormattedMessage(ctx, '✅ *Your account is already approved!* You can use all bot features.');
+    return;
+  }
+
+  if (registrationRequests.has(telegramId)) {
+    await sendFormattedMessage(ctx, '⏳ *Your registration is already pending approval.*\n\nPlease wait for the admin to review your request.');
+    return;
+  }
+
+  // Create registration request
+  registrationRequests.set(telegramId, {
+    telegramId,
+    username: username || null,
+    firstName: firstName || null,
+    lastName: lastName || null,
+    status: 'pending',
+    timestamp: new Date()
+  });
+
+  // Notify admin with inline keyboard
+  const adminMessage = `📋 **New Registration Request** 📋
+
+👤 **User Information:**
+• Telegram ID: ${telegramId}
+• Username: @${username || 'N/A'}
+• Name: ${firstName || ''} ${lastName || ''}
+
+📅 **Request Details:**
+• Status: ⏳ Pending
+• Date: ${new Date().toLocaleDateString()}
+
+🎯 **Actions:**
+• Approve or Reject below`;
+
+  const keyboard = new InlineKeyboard()
+    .text("✅ Approve", `approve_${telegramId}`)
+    .text("❌ Reject", `reject_${telegramId}`);
+
+  await notifyAdmin(adminMessage, keyboard);
+
+  const userMessage = `📋 **Registration Submitted** 📋
+
+✅ *Your registration request has been submitted successfully!*
+
+👤 **Your Details:**
+• Telegram ID: ${telegramId}
+• Username: @${username || 'N/A'}
+
+⏳ **Next Steps:**
+• Your request is now pending admin approval
+• You'll receive a notification once reviewed
+• Approval typically takes 24-48 hours
+
+💎 **After Approval:**
+• Full access to all OSINT tools
+• Starting credits balance
+• Premium features available
+
+🔔 *You'll be notified when your registration is processed*`;
+
+  await sendFormattedMessage(ctx, userMessage);
+});
+
+// Callback query handler for verification
+bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  const targetUserId = ctx.callbackQuery.data.split('_')[1];
+  
+  // Only allow the user themselves to verify
+  if (telegramId !== targetUserId) {
+    await ctx.answerCallbackQuery('❌ You can only verify your own membership.');
+    return;
+  }
+
+  // Check if user is already verified
+  if (verifiedUsers.has(targetUserId)) {
+    await ctx.answerCallbackQuery('✅ You have already verified your channel membership!');
+    return;
+  }
+
+  // Check if user is a member of the verification channel
+  const isMember = await checkChannelMembership(targetUserId);
+  
+  if (isMember) {
+    verifiedUsers.add(targetUserId);
+    await ctx.answerCallbackQuery('✅ Verification successful! You can now register.');
+    await ctx.editMessageText(`✅ **Verification Successful** ✅
+
+🎉 *You have successfully verified your membership in ${verificationChannel}!*
+
+📋 **Next Steps:**
+• You can now use /register to submit your registration request
+• Your verification status has been saved
+
+🚀 *Thank you for joining our updates channel!*`);
+  } else {
+    await ctx.answerCallbackQuery('❌ Verification failed. Please join the channel first.');
+    await ctx.editMessageText(`❌ **Verification Failed** ❌
+
+📋 *You need to join ${verificationChannel} before you can register.*
+
+🔗 **Join Channel:**
+• Click the button below to join
+• After joining, click "Verify Membership" again
+
+📢 *Channel membership is required for registration*`, {
+      reply_markup: new InlineKeyboard()
+        .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+        .text("✅ Verify Membership", `verify_${targetUserId}`)
+    });
+  }
+});
+
+// Callback query handler for registration
+bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await ctx.answerCallbackQuery('❌ Only admins can process registrations.');
+    return;
+  }
+
+  const match = ctx.callbackQuery.data.match(/^(approve|reject)_(\d+)$/);
+  if (!match) return;
+
+  const action = match[1];
+  const targetUserId = match[2];
+
+  const request = registrationRequests.get(targetUserId);
+  if (!request) {
+    await ctx.answerCallbackQuery('❌ Registration request not found.');
+    return;
+  }
+
+  // Check if user already exists
+  let user = users.get(targetUserId);
+  if (!user) {
+    user = {
+      telegramId: targetUserId,
+      username: request.username,
+      firstName: request.firstName,
+      lastName: request.lastName,
+      isApproved: false,
+      credits: 0,
+      isPremium: false,
+      isAdmin: false,
+      totalQueries: 0,
+      registrationDate: new Date()
+    };
+  }
+
+  if (action === 'approve') {
+    user.isApproved = true;
+    user.credits = 25; // Give starting credits
+    users.set(targetUserId, user);
+    registrationRequests.delete(targetUserId);
+
+    const userMessage = `🎉 **Registration Approved!** 🎉
+
+✅ *Congratulations! Your registration has been approved.*
+
+💎 **Welcome Benefits:**
+• 25 starting credits 🪙
+• Full access to all OSINT tools
+• Premium features available
+
+🚀 **Get Started:**
+• Use /start to see all available commands
+• Try /help for detailed instructions
+• Check /credits to see your balance
+
+⚡ *Thank you for joining our OSINT community!*`;
+
+    await notifyUser(targetUserId, userMessage);
+    await ctx.answerCallbackQuery('✅ Registration approved successfully!');
+    
+    // Update the message
+    await ctx.editMessageText(`✅ **Registration Approved** ✅
+
+👤 **User:** @${user.username || 'N/A'} (${targetUserId})
+📅 **Processed:** ${new Date().toLocaleDateString()}
+🎯 **Status:** Approved
+
+*Processed by:* @${ctx.from?.username || 'Admin'}`);
+
+  } else if (action === 'reject') {
+    registrationRequests.delete(targetUserId);
+
+    const userMessage = `❌ **Registration Rejected** ❌
+
+📋 *Your registration request has been rejected.*
+
+📞 **Next Steps:**
+• Contact the admin for more information
+• Review registration requirements
+• You may submit a new request if needed
+
+💡 *If you believe this is an error, please reach out to our support team*`;
+
+    await notifyUser(targetUserId, userMessage);
+    await ctx.answerCallbackQuery('❌ Registration rejected');
+    
+    // Update the message
+    await ctx.editMessageText(`❌ **Registration Rejected** ❌
+
+👤 **User:** @${user.username || 'N/A'} (${targetUserId})
+📅 **Processed:** ${new Date().toLocaleDateString()}
+🎯 **Status:** Rejected
+
+*Processed by:* @${ctx.from?.username || 'Admin'}`);
+  }
 });
 
 // Universal video downloader command
@@ -845,181 +1129,6 @@ bot.command('terabox', async (ctx) => {
     console.error('Error in terabox command:', error);
     user.credits += 1; // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
-  }
-});
-
-// Registration command
-bot.command('register', async (ctx) => {
-  const telegramId = ctx.from?.id.toString();
-  const username = ctx.from?.username;
-  const firstName = ctx.from?.first_name;
-  const lastName = ctx.from?.last_name;
-
-  if (!telegramId) return;
-
-  const user = users.get(telegramId);
-  
-  if (user && user.isApproved) {
-    await sendFormattedMessage(ctx, '✅ *Your account is already approved!* You can use all bot features.');
-    return;
-  }
-
-  if (registrationRequests.has(telegramId)) {
-    await sendFormattedMessage(ctx, '⏳ *Your registration is already pending approval.*\n\nPlease wait for the admin to review your request.');
-    return;
-  }
-
-  // Create registration request
-  registrationRequests.set(telegramId, {
-    telegramId,
-    username: username || null,
-    firstName: firstName || null,
-    lastName: lastName || null,
-    status: 'pending',
-    timestamp: new Date()
-  });
-
-  // Notify admin with inline keyboard
-  const adminMessage = `📋 **New Registration Request** 📋
-
-👤 **User Information:**
-• Telegram ID: ${telegramId}
-• Username: @${username || 'N/A'}
-• Name: ${firstName || ''} ${lastName || ''}
-
-📅 **Request Details:**
-• Status: ⏳ Pending
-• Date: ${new Date().toLocaleDateString()}
-
-🎯 **Actions:**
-• Approve or Reject below`;
-
-  const keyboard = new InlineKeyboard()
-    .text("✅ Approve", `approve_${telegramId}`)
-    .text("❌ Reject", `reject_${telegramId}`);
-
-  await notifyAdmin(adminMessage, keyboard);
-
-  const userMessage = `📋 **Registration Submitted** 📋
-
-✅ *Your registration request has been submitted successfully!*
-
-👤 **Your Details:**
-• Telegram ID: ${telegramId}
-• Username: @${username || 'N/A'}
-
-⏳ **Next Steps:**
-• Your request is now pending admin approval
-• You'll receive a notification once reviewed
-• Approval typically takes 24-48 hours
-
-💎 **After Approval:**
-• Full access to all OSINT tools
-• Starting credits balance
-• Premium features available
-
-🔔 *You'll be notified when your registration is processed*`;
-
-  await sendFormattedMessage(ctx, userMessage);
-});
-
-// Callback query handler for registration
-bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
-  const telegramId = ctx.from?.id.toString();
-  
-  if (!telegramId || !isAdmin(telegramId)) {
-    await ctx.answerCallbackQuery('❌ Only admins can process registrations.');
-    return;
-  }
-
-  const match = ctx.callbackQuery.data.match(/^(approve|reject)_(\d+)$/);
-  if (!match) return;
-
-  const action = match[1];
-  const targetUserId = match[2];
-
-  const request = registrationRequests.get(targetUserId);
-  if (!request) {
-    await ctx.answerCallbackQuery('❌ Registration request not found.');
-    return;
-  }
-
-  // Check if user already exists
-  let user = users.get(targetUserId);
-  if (!user) {
-    user = {
-      telegramId: targetUserId,
-      username: request.username,
-      firstName: request.firstName,
-      lastName: request.lastName,
-      isApproved: false,
-      credits: 0,
-      isPremium: false,
-      isAdmin: false,
-      totalQueries: 0,
-      registrationDate: new Date()
-    };
-  }
-
-  if (action === 'approve') {
-    user.isApproved = true;
-    user.credits = 25; // Give starting credits
-    users.set(targetUserId, user);
-    registrationRequests.delete(targetUserId);
-
-    const userMessage = `🎉 **Registration Approved!** 🎉
-
-✅ *Congratulations! Your registration has been approved.*
-
-💎 **Welcome Benefits:**
-• 25 starting credits 🪙
-• Full access to all OSINT tools
-• Premium features available
-
-🚀 **Get Started:**
-• Use /start to see all available commands
-• Try /help for detailed instructions
-• Check /credits to see your balance
-
-⚡ *Thank you for joining our OSINT community!*`;
-
-    await notifyUser(targetUserId, userMessage);
-    await ctx.answerCallbackQuery('✅ Registration approved successfully!');
-    
-    // Update the message
-    await ctx.editMessageText(`✅ **Registration Approved** ✅
-
-👤 **User:** @${user.username || 'N/A'} (${targetUserId})
-📅 **Processed:** ${new Date().toLocaleDateString()}
-🎯 **Status:** Approved
-
-*Processed by:* @${ctx.from?.username || 'Admin'}`);
-
-  } else if (action === 'reject') {
-    registrationRequests.delete(targetUserId);
-
-    const userMessage = `❌ **Registration Rejected** ❌
-
-📋 *Your registration request has been rejected.*
-
-📞 **Next Steps:**
-• Contact the admin for more information
-• Review registration requirements
-• You may submit a new request if needed
-
-💡 *If you believe this is an error, please reach out to our support team*`;
-
-    await notifyUser(targetUserId, userMessage);
-    await ctx.answerCallbackQuery('❌ Registration rejected');
-    
-    // Update the message
-    await ctx.editMessageText(`❌ **Registration Rejected** ❌
-
-👤 **User:** @${user.username || 'N/A'} (${targetUserId})
-📅 **Processed:** ${new Date().toLocaleDateString()}
-🎯 **Status:** Rejected
-
-*Processed by:* @${ctx.from?.username || 'Admin'}`);
   }
 });
 
@@ -2887,7 +2996,17 @@ bot.command('checkstatus', async (ctx) => {
     if (request) {
       await sendFormattedMessage(ctx, '⏳ *Your registration is pending approval.*\n\nPlease wait for the admin to review your request.');
     } else {
-      await sendFormattedMessage(ctx, '❌ *No registration found.*\n\nPlease use /register to submit your registration request.');
+      // Check if user has verified channel membership
+      if (verifiedUsers.has(telegramId)) {
+        await sendFormattedMessage(ctx, '✅ *You have verified your channel membership!* You can now proceed with registration using /register.');
+      } else {
+        // Create inline keyboard with join and verify buttons
+        const keyboard = new InlineKeyboard()
+          .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+          .text("✅ Verify Membership", `verify_${telegramId}`);
+        
+        await sendFormattedMessage(ctx, '❌ *No registration found.*\n\nPlease join the updates channel and verify your membership before registering.', keyboard);
+      }
     }
   }
 });
@@ -2929,7 +3048,7 @@ bot.command('sync', async (ctx) => {
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /verify\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
 });
 
 // Error handling with conflict resolution
@@ -2971,6 +3090,7 @@ bot.start().then(() => {
   console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
   console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
   console.log('🔧 Real maintenance mode functionality is now active!');
+  console.log('📢 Channel membership verification is now active!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
