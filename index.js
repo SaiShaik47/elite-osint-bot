@@ -23,6 +23,9 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHANNEL_ID = -1003133803574; // Osint Updates (CONFIRMED)
 const CHANNEL_URL = 'https://t.me/OsintShitUpdates';
 
+// Admin Telegram IDs
+const ADMINS = [process.env.ADMIN_USER_ID];
+
 // ===============================
 // MEMORY STORAGE (NO DB)
 // ===============================
@@ -1987,6 +1990,240 @@ bot.command('give', async (ctx) => {
   await sendFormattedMessage(ctx, adminMessage);
 });
 
+bot.command('remove', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const args = ctx.match?.toString().split(' ');
+  if (!args || args.length < 2) {
+    await sendFormattedMessage(ctx, '💸 Usage: /remove <user_id> <amount>\n\nExample: /remove 123456789 100');
+    return;
+  }
+
+  const targetUserId = args[0];
+  const amount = parseInt(args[1]);
+
+  if (isNaN(amount) || amount <= 0) {
+    await sendFormattedMessage(ctx, '❌ Please provide a valid positive amount.');
+    return;
+  }
+
+  const targetUser = users.get(targetUserId);
+  if (!targetUser) {
+    await sendFormattedMessage(ctx, '❌ User not found.');
+    return;
+  }
+
+  if (targetUser.credits < amount) {
+    await sendFormattedMessage(ctx, `❌ User only has ${targetUser.credits} credits. Cannot remove ${amount}.`);
+    return;
+  }
+
+  targetUser.credits -= amount;
+
+  const userMessage = `💸 Credits Deducted 💸
+
+💰 Amount: -${amount} credits
+💳 New Balance: ${targetUser.credits} credits
+👤 Action by: Admin
+
+📝 If you have questions about this deduction, please contact support.`;
+
+  await notifyUser(targetUserId, userMessage);
+
+  const adminMessage = `💸 Credits Removed Successfully 💸
+
+✅ Transaction Details:
+• User ID: ${targetUserId}
+• Amount: ${amount} credits
+• New Balance: ${targetUser.credits} credits
+• Admin: @${ctx.from?.username}
+
+🎯 User has been notified about the credit deduction`;
+
+  await sendFormattedMessage(ctx, adminMessage);
+});
+
+bot.command('giveall', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const amount = parseInt(ctx.match?.toString());
+  if (isNaN(amount) || amount <= 0) {
+    await sendFormattedMessage(ctx, '🌍 Usage: /giveall <amount>\n\nExample: /giveall 100');
+    return;
+  }
+
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
+  
+  if (approvedUsers.length === 0) {
+    await sendFormattedMessage(ctx, '⚠️ No approved users found to give credits to.');
+    return;
+  }
+
+  let successCount = 0;
+  let totalAmount = 0;
+
+  for (const user of approvedUsers) {
+    user.credits += amount;
+    successCount++;
+    totalAmount += amount;
+
+    // Notify user
+    const userMessage = `🎉 Bonus Credits Received! 🎉
+
+💰 Amount: +${amount} credits
+💳 New Balance: ${user.credits} credits
+👤 From: Admin (Global Bonus)
+
+✨ Enjoy your bonus credits! Use them wisely for OSINT lookups.`;
+
+    await notifyUser(user.telegramId, userMessage).catch(err => 
+      console.error(`Failed to notify user ${user.telegramId}:`, err)
+    );
+  }
+
+  const adminMessage = `🌍 Global Credits Granted Successfully 🌍
+
+✅ Transaction Details:
+• Users Updated: ${successCount}
+• Credits per User: ${amount}
+• Total Credits Distributed: ${totalAmount}
+• Admin: @${ctx.from?.username}
+
+🎯 All users have been notified about the credit grant`;
+
+  await sendFormattedMessage(ctx, adminMessage);
+});
+
+bot.command('removeall', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const amount = parseInt(ctx.match?.toString());
+  if (isNaN(amount) || amount <= 0) {
+    await sendFormattedMessage(ctx, '🗑️ Usage: /removeall <amount>\n\nExample: /removeall 50');
+    return;
+  }
+
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
+  
+  if (approvedUsers.length === 0) {
+    await sendFormattedMessage(ctx, '⚠️ No approved users found to remove credits from.');
+    return;
+  }
+
+  let successCount = 0;
+  let totalAmount = 0;
+
+  for (const user of approvedUsers) {
+    if (user.credits >= amount) {
+      user.credits -= amount;
+      successCount++;
+      totalAmount += amount;
+
+      // Notify user
+      const userMessage = `💸 Credits Deducted 💸
+
+💰 Amount: -${amount} credits
+💳 New Balance: ${user.credits} credits
+👤 Action by: Admin (Global Adjustment)
+
+📝 If you have questions about this deduction, please contact support.`;
+
+      await notifyUser(user.telegramId, userMessage).catch(err => 
+        console.error(`Failed to notify user ${user.telegramId}:`, err)
+      );
+    }
+  }
+
+  const adminMessage = `🗑️ Global Credits Removed Successfully 🗑️
+
+✅ Transaction Details:
+• Users Updated: ${successCount}
+• Credits per User: ${amount}
+• Total Credits Removed: ${totalAmount}
+• Admin: @${ctx.from?.username}
+
+🎯 All affected users have been notified about the credit deduction`;
+
+  await sendFormattedMessage(ctx, adminMessage);
+});
+
+bot.command('setcredits', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const args = ctx.match?.toString().split(' ');
+  if (!args || args.length < 2) {
+    await sendFormattedMessage(ctx, '🎯 Usage: /setcredits <user_id> <amount>\n\nExample: /setcredits 123456789 1000');
+    return;
+  }
+
+  const targetUserId = args[0];
+  const amount = parseInt(args[1]);
+
+  if (isNaN(amount) || amount < 0) {
+    await sendFormattedMessage(ctx, '❌ Please provide a valid non-negative amount.');
+    return;
+  }
+
+  const targetUser = users.get(targetUserId);
+  if (!targetUser) {
+    await sendFormattedMessage(ctx, '❌ User not found.');
+    return;
+  }
+
+  const oldCredits = targetUser.credits;
+  targetUser.credits = amount;
+
+  const userMessage = amount > oldCredits ? 
+    `🎉 Credits Updated! 🎉
+
+💰 Amount: +${amount - oldCredits} credits
+💳 New Balance: ${targetUser.credits} credits
+👤 Updated by: Admin
+
+✨ Enjoy your credits! Use them wisely for OSINT lookups.` :
+    `💸 Credits Updated 💸
+
+💰 Amount: ${amount - oldCredits} credits
+💳 New Balance: ${targetUser.credits} credits
+👤 Updated by: Admin
+
+📝 If you have questions about this change, please contact support.`;
+
+  await notifyUser(targetUserId, userMessage);
+
+  const adminMessage = `🎯 Credits Set Successfully 🎯
+
+✅ Transaction Details:
+• User ID: ${targetUserId}
+• Old Balance: ${oldCredits} credits
+• New Balance: ${targetUser.credits} credits
+• Admin: @${ctx.from?.username}
+
+🎯 User has been notified about the credit update`;
+
+  await sendFormattedMessage(ctx, adminMessage);
+});
+
 bot.command('premium', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
@@ -2883,27 +3120,7 @@ bot.command('lucky', async (ctx) => {
   await sendFormattedMessage(ctx, adminMessage);
 });
 
-// Placeholder commands with premium responses
-bot.command('reset_daily', async (ctx) => {
-  const telegramId = ctx.from?.id.toString();
-  
-  if (!telegramId || !isAdmin(telegramId)) {
-    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-    return;
-  }
-
-  const message = `🔄 Daily Statistics Reset 🔄
-
-✅ Reset Details:
-• Users Updated: ${users.size}
-• Reset Date: ${new Date().toLocaleDateString()}
-• Admin: @${ctx.from?.username}
-
-📊 All daily query counts have been reset to zero`;
-
-  await sendFormattedMessage(ctx, message);
-});
-
+// Mass premium upgrade command
 bot.command('masspremium', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
@@ -2912,22 +3129,191 @@ bot.command('masspremium', async (ctx) => {
     return;
   }
 
-  const message = `👑 Mass Premium Upgrade 👑
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved && !u.isPremium);
+  
+  if (approvedUsers.length === 0) {
+    await sendFormattedMessage(ctx, '⚠️ No approved non-premium users found for mass premium upgrade.');
+    return;
+  }
 
-🎊 Upgrade Features:
-• Multiple user selection
-• Bulk premium status
-• Discounted pricing
-• Special promotions
+  let successCount = 0;
+  let failCount = 0;
 
-👑 This feature requires additional implementation
+  for (const user of approvedUsers) {
+    try {
+      user.isPremium = true;
+      successCount++;
 
-🎯 Current Premium Users: ${Array.from(users.values()).filter(u => u.isPremium).length}
-👤 Requested by: @${ctx.from?.username}`;
+      // Notify user
+      const userMessage = `🎉 Premium Status Granted! 🎉
+
+💎 Welcome to Premium!
+✅ Unlimited queries
+⚡ Priority API access
+🔧 Advanced tools
+📞 24/7 support
+
+🌟 Thank you for upgrading to Premium!
+
+💎 Enjoy your exclusive benefits!`;
+
+      await notifyUser(user.telegramId, userMessage);
+    } catch (error) {
+      console.error(`Failed to upgrade user ${user.telegramId}:`, error);
+      failCount++;
+    }
+  }
+
+  const adminMessage = `👑 Mass Premium Upgrade Completed 👑
+
+✅ Upgrade Summary:
+• Total Users: ${approvedUsers.length}
+• Successful Upgrades: ${successCount}
+• Failed Upgrades: ${failCount}
+• Admin: @${ctx.from?.username}
+
+🎯 All upgraded users have been notified about their new premium status`;
+
+  await sendFormattedMessage(ctx, adminMessage);
+});
+
+// Remove premium from all users command
+bot.command('massremovepremium', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium && !u.isAdmin);
+  
+  if (premiumUsers.length === 0) {
+    await sendFormattedMessage(ctx, '⚠️ No premium users found for mass premium removal.');
+    return;
+  }
+
+  let successCount = 0;
+  let failCount = 0;
+
+  for (const user of premiumUsers) {
+    try {
+      user.isPremium = false;
+      successCount++;
+
+      // Notify user
+      const userMessage = `💳 Premium Status Revoked 💳
+
+📋 Status Changed:
+• Premium access revoked
+• Back to standard features
+• Contact admin for details
+
+📞 If you have questions about this change, please reach out to support`;
+
+      await notifyUser(user.telegramId, userMessage);
+    } catch (error) {
+      console.error(`Failed to remove premium from user ${user.telegramId}:`, error);
+      failCount++;
+    }
+  }
+
+  const adminMessage = `🚫 Mass Premium Removal Completed 🚫
+
+✅ Removal Summary:
+• Total Premium Users: ${premiumUsers.length}
+• Successful Removals: ${successCount}
+• Failed Removals: ${failCount}
+• Admin: @${ctx.from?.username}
+
+🎯 All affected users have been notified about the premium status change`;
+
+  await sendFormattedMessage(ctx, adminMessage);
+});
+
+// Remove premium from a specific user command
+bot.command('removepremium', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const targetUserId = ctx.match?.toString();
+  if (!targetUserId) {
+    await sendFormattedMessage(ctx, '❌ Usage: /removepremium <user_id>\n\nExample: /removepremium 123456789');
+    return;
+  }
+
+  const targetUser = users.get(targetUserId);
+  if (!targetUser) {
+    await sendFormattedMessage(ctx, '❌ User not found.');
+    return;
+  }
+
+  if (!targetUser.isPremium) {
+    await sendFormattedMessage(ctx, '⚠️ This user is not a premium member.');
+    return;
+  }
+
+  targetUser.isPremium = false;
+
+  const userMessage = `💳 Premium Status Revoked 💳
+
+📋 Status Changed:
+• Premium access revoked
+• Back to standard features
+• Contact admin for details
+
+📞 If you have questions about this change, please reach out to support`;
+
+  await notifyUser(targetUserId, userMessage);
+
+  const adminMessage = `🚫 Premium Status Removed 🚫
+
+✅ Action Details:
+• User ID: ${targetUserId}
+• Username: @${targetUser.username || 'N/A'}
+• Action: Premium access removed
+• Admin: @${ctx.from?.username}
+
+🎯 User has been notified about the premium status change`;
+
+  await sendFormattedMessage(ctx, adminMessage);
+});
+
+// Reset daily statistics command
+bot.command('reset_daily', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  // Reset daily query counts for all users
+  let resetCount = 0;
+  for (const [userId, user] of users.entries()) {
+    if (user.totalQueries > 0) {
+      user.totalQueries = 0;
+      resetCount++;
+    }
+  }
+
+  const message = `🔄 Daily Statistics Reset 🔄
+
+✅ Reset Details:
+• Users Updated: ${resetCount}
+• Reset Date: ${new Date().toLocaleDateString()}
+• Admin: @${ctx.from?.username}
+
+📊 All daily query counts have been reset to zero`;
 
   await sendFormattedMessage(ctx, message);
 });
 
+// Reset user account command
 bot.command('resetuser', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
@@ -2937,27 +3323,59 @@ bot.command('resetuser', async (ctx) => {
   }
 
   const targetUserId = ctx.match?.toString();
-  const targetUser = targetUserId ? users.get(targetUserId) : null;
+  if (!targetUserId) {
+    await sendFormattedMessage(ctx, '🔄 Usage: /resetuser <user_id>\n\nExample: /resetuser 123456789');
+    return;
+  }
 
-  const message = `🔄 User Account Reset 🔄
+  const targetUser = users.get(targetUserId);
+  if (!targetUser) {
+    await sendFormattedMessage(ctx, '❌ User not found.');
+    return;
+  }
 
-⚠️ User reset functionality would be implemented here
+  // Reset user data
+  const oldCredits = targetUser.credits;
+  const oldQueries = targetUser.totalQueries;
+  const wasPremium = targetUser.isPremium;
+  const wasAdmin = targetUser.isAdmin;
+  
+  targetUser.credits = 0;
+  targetUser.totalQueries = 0;
+  targetUser.isPremium = false;
+  // Keep admin status to avoid removing admin access accidentally
 
-🔄 Reset Features:
-• Clear user statistics
-• Reset credit balance
-• Remove query history
-• Fresh start option
+  const userMessage = `🔄 Account Reset 🔄
 
-👤 Target User: @${targetUser?.username || 'N/A'} (${targetUserId || 'Not specified'})
-🎯 Current Status: User data preserved
-👤 Requested by: @${ctx.from?.username}
+📋 Your account has been reset by an administrator.
 
-🔄 This feature requires additional implementation`;
+🔄 Reset Details:
+• Credits: ${oldCredits} → 0
+• Queries: ${oldQueries} → 0
+• Premium: ${wasPremium ? 'Yes → No' : 'No'}
+• Admin: ${wasAdmin ? 'Yes (unchanged)' : 'No'}
 
-  await sendFormattedMessage(ctx, message);
+📞 If you have questions about this reset, please contact the admin`;
+
+  await notifyUser(targetUserId, userMessage);
+
+  const adminMessage = `🔄 User Account Reset 🔄
+
+✅ Reset Details:
+• User ID: ${targetUserId}
+• Username: @${targetUser.username || 'N/A'}
+• Old Credits: ${oldCredits}
+• Old Queries: ${oldQueries}
+• Was Premium: ${wasPremium ? 'Yes' : 'No'}
+• Admin Status: ${wasAdmin ? 'Yes (unchanged)' : 'No'}
+• Admin: @${ctx.from?.username}
+
+🎯 User has been notified about the account reset`;
+
+  await sendFormattedMessage(ctx, adminMessage);
 });
 
+// View system logs command
 bot.command('logs', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
@@ -2966,27 +3384,37 @@ bot.command('logs', async (ctx) => {
     return;
   }
 
+  const totalUsers = users.size;
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved).length;
+  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
+  const adminUsers = Array.from(users.values()).filter(u => u.isAdmin).length;
+  const totalQueries = Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0);
+  const pendingRegistrations = registrationRequests.size;
+  const verifiedCount = verifiedUsers.size;
+
   const message = `📜 System Logs 📜
-
-⚠️ System logs functionality would be implemented here
-
-📋 Log Categories:
-• Error logs
-• User activity logs
-• System performance logs
-• Security logs
 
 📊 Current System Status:
 • Bot: ✅ Online
-• Users: ${users.size} registered
-• Queries: ${Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0)} total
-• Admin: @${ctx.from?.username}
+• Total Users: ${totalUsers}
+• Approved Users: ${approvedUsers}
+• Premium Users: ${premiumUsers}
+• Admin Users: ${adminUsers}
+• Verified Users: ${verifiedCount}
+• Pending Registrations: ${pendingRegistrations}
+• Total Queries: ${totalQueries}
 
-📜 This feature requires additional implementation`;
+🔧 System Configuration:
+• Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
+• Bot Start Time: ${new Date().toLocaleString()}
+• Admin ID: ${adminId}
+
+📝 Note: This is a basic log overview. For detailed logs, check your hosting provider's logs.`;
 
   await sendFormattedMessage(ctx, message);
 });
 
+// Create database backup command
 bot.command('backup', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
@@ -2995,25 +3423,64 @@ bot.command('backup', async (ctx) => {
     return;
   }
 
-  const message = `💾 Database Backup 💾
+  // Create backup data
+  const usersData = Array.from(users.entries()).map(([id, user]) => ({
+    id,
+    username: user.username,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    isApproved: user.isApproved,
+    credits: user.credits,
+    isPremium: user.isPremium,
+    isAdmin: user.isAdmin,
+    totalQueries: user.totalQueries,
+    registrationDate: user.registrationDate
+  }));
 
-⚠️ Backup functionality would be implemented here
+  const registrationsData = Array.from(registrationRequests.entries()).map(([id, request]) => ({
+    id,
+    username: request.username,
+    firstName: request.firstName,
+    lastName: request.lastName,
+    status: request.status,
+    timestamp: request.timestamp
+  }));
 
-📋 Backup Features:
-• User data export
-• Query history backup
-• Credit transaction logs
-• Settings and configurations
+  const verifiedData = Array.from(verifiedUsers);
 
-📊 Current Data:
-• Total Users: ${users.size}
-• Total Queries: ${Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0)} total
-• Registration Requests: ${registrationRequests.size}
-• Admin: @${ctx.from?.username}
+  const backupData = {
+    timestamp: new Date().toISOString(),
+    users: usersData,
+    registrations: registrationsData,
+    verifiedUsers: verifiedData,
+    maintenanceMode,
+    maintenanceMessage
+  };
 
-💾 This feature requires additional implementation`;
+  // Convert to JSON string
+  const backupJson = JSON.stringify(backupData, null, 2);
 
-  await sendFormattedMessage(ctx, message);
+  // Send backup to admin
+  try {
+    await ctx.replyWithDocument(
+      Buffer.from(backupJson),
+      {
+        filename: `osint_bot_backup_${new Date().toISOString().replace(/:/g, '-')}.json`,
+        caption: `💾 Database Backup 💾
+
+📊 Backup Details:
+• Users: ${usersData.length}
+• Registrations: ${registrationsData.length}
+• Verified Users: ${verifiedData.length}
+• Timestamp: ${new Date().toLocaleString()}
+
+💾 Keep this file safe for future restoration if needed`
+      }
+    );
+  } catch (error) {
+    console.error('Error sending backup:', error);
+    await sendFormattedMessage(ctx, '❌ Failed to create or send backup. The backup data might be too large for Telegram.');
+  }
 });
 
 // Check registration status command
