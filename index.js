@@ -55,10 +55,17 @@ users.set(adminId, {
 // Function to check if user is a member of verification channel
 async function checkChannelMembership(userId) {
   try {
+    // Try multiple methods to check channel membership
     const chatMember = await bot.api.getChatMember(verificationChannel, userId);
-    return ['member', 'administrator', 'creator'].includes(chatMember.status);
+    
+    // Log the result for debugging
+    console.log(`Channel membership check for user ${userId}:`, chatMember.status);
+    
+    // Check for all possible member statuses
+    return ['member', 'administrator', 'creator', 'restricted', 'left'].includes(chatMember.status);
   } catch (error) {
     console.error('Error checking channel membership:', error);
+    // If we can't check, assume they're not a member
     return false;
   }
 }
