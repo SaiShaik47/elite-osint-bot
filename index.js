@@ -369,77 +369,91 @@ async function sendVideoSmart(ctx, videoUrl, caption) {
   }
 }
 
+// Escape Markdown to avoid Telegram parse errors
+function escapeMd(text = "") {
+  return text
+    .toString()
+    .replace(/[_*[\]()~`>#+=|{}.!-]/g, "\\$&");
+}
+
 // Fixed TeraBox multi-video downloads handler
 async function handleTeraBox(ctx, url) {
   try {
     const result = await downloadTeraBox(url);
     
     if (!result.success) {
-      return sendFormattedMessage(ctx, '❌ Failed to process TeraBox link.');
+      await sendFormattedMessage(ctx, '❌ Failed to process TeraBox link.');
+      return false;
     }
     
-    // Handle different response formats
+    // Your API returns: { data: [ {title, size, download, Channel}, ... ] }
     let videos = [];
     
     if (Array.isArray(result.data)) {
       videos = result.data;
-    } else if (result.data.videos && Array.isArray(result.data.videos)) {
-      videos = result.data.videos;
-    } else if (result.data.data && Array.isArray(result.data.data)) {
+    } else if (Array.isArray(result.data?.data)) {
       videos = result.data.data;
+    } else if (Array.isArray(result.data?.videos)) {
+      videos = result.data.videos;
     } else {
       // If we can't find an array of videos, check if the response itself contains a video
-      if (result.data.url || result.data.download_url) {
+      if (result.data?.download || result.data?.url) {
         videos = [result.data];
       } else {
-        return sendFormattedMessage(ctx, '❌ No videos found in TeraBox response.');
+        await sendFormattedMessage(ctx, '❌ No videos found in TeraBox response.');
+        return false;
       }
     }
     
-    if (videos.length === 0) {
-      return sendFormattedMessage(ctx, '❌ No videos found in TeraBox link.');
+    if (!videos.length) {
+      await sendFormattedMessage(ctx, '❌ No videos found in TeraBox link.');
+      return false;
     }
     
     // Send each video in a separate message with a delay to avoid rate limiting
     for (let i = 0; i < videos.length; i++) {
-      let videoUrl = null;
+      const item = videos[i] || {};
       
-      // Try multiple possible URL property names
-      if (videos[i]) {
-        videoUrl = videos[i].url || 
-                   videos[i].download_url || 
-                   videos[i].link || 
-                   videos[i].src || 
-                   videos[i].source;
-        
-        // If it's a string, use it directly
-        if (typeof videos[i] === 'string' && videos[i].startsWith('http')) {
-          videoUrl = videos[i];
-        }
-      }
+      // ✅ IMPORTANT: your field is "download"
+      const downloadUrl =
+        item.download ||
+        item.url ||
+        item.download_url ||
+        item.link ||
+        item.src ||
+        item.source ||
+        (typeof item === "string" ? item : null);
       
-      if (!videoUrl) {
-        console.log(`Could not extract URL for video ${i+1}:`, JSON.stringify(videos[i], null, 2));
+      if (!downloadUrl || typeof downloadUrl !== "string" || !downloadUrl.startsWith("http")) {
+        console.log(`Could not extract URL for video ${i+1}:`, JSON.stringify(item, null, 2));
         await sendFormattedMessage(ctx, `❌ Could not extract download link for video ${i+1}/${videos.length}`);
         continue;
       }
       
-      // Add a small delay between messages to avoid rate limiting
-      if (i > 0) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+      const title = item.title || item.name || `TeraBox Video ${i + 1}`;
+      const size = item.size || "Unknown";
+      const channel = item.Channel || item.channel || "";
       
-      await sendVideoSmart(
-        ctx,
-        videoUrl,
-        `📦 TeraBox Video ${i + 1}/${videos.length}`
-      );
+      // ✅ Full info message (like your screenshot)
+      const msg =
+        `📦 *TeraBox Video ${i + 1}/${videos.length}*\n\n` +
+        `*Title:* \`${escapeMd(title)}\`\n` +
+        `*Size:* \`${escapeMd(size)}\`\n` +
+        (channel ? `*Channel:* \`${escapeMd(channel)}\`\n` : "") +
+        `\n*Download:* \n${downloadUrl}`;
+
+      // small delay to avoid flood
+      if (i > 0) await new Promise((r) => setTimeout(r, 1200));
+
+      // send as text with info (always works)
+      await ctx.reply(msg, { parse_mode: "Markdown" });
     }
     
     return true;
   } catch (error) {
     console.error('Error handling TeraBox:', error);
-    return sendFormattedMessage(ctx, '❌ Error processing TeraBox link.');
+    await sendFormattedMessage(ctx, '❌ Error processing TeraBox link.');
+    return false;
   }
 }
 
@@ -3325,7 +3339,7 @@ bot.command('resetuser', async (ctx) => {
 • Premium: ${wasPremium ? 'Yes → No' : 'No'}
 • Admin: ${wasAdmin ? 'Yes (unchanged)' : 'No'}
 
-📞 If you have questions about this reset, please contact the admin`;
+📞 If you have questions about this reset, please contact admin`;
 
   await notifyUser(targetUserId, userMessage);
 
