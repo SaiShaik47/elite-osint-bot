@@ -16,14 +16,20 @@ if (!botToken) {
 // Initialize bot
 const bot = new Bot(botToken);
 
-// In-memory storage
+// ===============================
+// CONFIGURATION (EDIT ONLY THIS)
+// ===============================
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHANNEL_ID = -1003133803574; // Osint Updates (CONFIRMED)
+const CHANNEL_URL = 'https://t.me/OsintShitUpdates';
+
+// ===============================
+// MEMORY STORAGE (NO DB)
+// ===============================
 const users = new Map();
 const registrationRequests = new Map();
 const verifiedUsers = new Set(); // Track users who have verified channel membership
 const adminId = process.env.ADMIN_USER_ID;
-
-// Channel to join for verification
-const verificationChannel = '@OsintShitUpdates';
 
 // Maintenance mode flag (stored in memory, will reset on bot restart)
 let maintenanceMode = false;
@@ -52,20 +58,25 @@ users.set(adminId, {
   registrationDate: new Date()
 });
 
-// Function to check if user is a member of verification channel
+// ===============================
+// BULLETPROOF JOIN CHECK
+// ===============================
 async function checkChannelMembership(userId) {
   try {
-    // Try multiple methods to check channel membership
-    const chatMember = await bot.api.getChatMember(verificationChannel, userId);
+    const member = await bot.api.getChatMember(CHANNEL_ID, userId);
     
     // Log the result for debugging
-    console.log(`Channel membership check for user ${userId}:`, chatMember.status);
+    console.log('[JOIN CHECK]', userId, member.status);
     
-    // Check for all possible member statuses
-    return ['member', 'administrator', 'creator', 'restricted', 'left'].includes(chatMember.status);
+    // Check for all possible member statuses including 'restricted'
+    return [
+      'member',
+      'administrator',
+      'creator',
+      'restricted'
+    ].includes(member.status);
   } catch (error) {
-    console.error('Error checking channel membership:', error);
-    // If we can't check, assume they're not a member
+    console.error('[JOIN CHECK ERROR]', error);
     return false;
   }
 }
@@ -581,10 +592,17 @@ async function notifyAdmin(message, keyboard) {
   }
 }
 
-// Global middleware to check channel membership
+// ===============================
+// GLOBAL BOT LOCK MIDDLEWARE
+// ===============================
 bot.use(async (ctx, next) => {
   // Skip channel membership check for admin users
   if (isAdmin(ctx.from?.id.toString())) {
+    return next();
+  }
+  
+  // Always allow verify callback
+  if (ctx.callbackQuery?.data?.startsWith('verify_')) {
     return next();
   }
   
@@ -596,14 +614,11 @@ bot.use(async (ctx, next) => {
   // If user is not verified, block access
   if (!verifiedUsers.has(ctx.from?.id.toString())) {
     return ctx.reply(
-      '🔒 Join our channel to use this bot.',
+      '🔒 You must join our channel to use this bot.',
       {
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '📢 Join Channel', url: 'https://t.me/OsintShitUpdates' },
-            { text: '✅ Verify', callback_data: `verify_${ctx.from.id}` }
-          ]]
-        }
+        reply_markup: new InlineKeyboard()
+          .url('📢 Join Channel', CHANNEL_URL)
+          .text('✅ Verify', `verify_${ctx.from.id}`)
       }
     );
   }
@@ -616,12 +631,9 @@ bot.use(async (ctx, next) => {
     return ctx.reply(
       '❌ You left the channel.\n\nJoin again to continue.',
       {
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '📢 Join Channel', url: 'https://t.me/OsintShitUpdates' },
-            { text: '✅ Verify Again', callback_data: `verify_${ctx.from.id}` }
-          ]]
-        }
+        reply_markup: new InlineKeyboard()
+          .url('📢 Join Channel', CHANNEL_URL)
+          .text('✅ Verify Again', `verify_${ctx.from.id}`)
       }
     );
   }
@@ -646,7 +658,9 @@ bot.use((ctx, next) => {
   return next();
 });
 
-// Start command with registration management
+// ===============================
+// START COMMAND
+// ===============================
 bot.command('start', async (ctx) => {
   const user = getOrCreateUser(ctx);
   
@@ -659,7 +673,7 @@ bot.command('start', async (ctx) => {
 
 Your account is pending approval by our admin team. 
 
-🔹 Join ${verificationChannel} to get started
+🔹 Join our channel to get started
 🔹 Click "Verify Membership" after joining
 🔹 Then use /register to submit your registration request
 🔹 You'll be notified once approved
@@ -671,7 +685,7 @@ Your account is pending approval by our admin team.
 
     // Create inline keyboard with join and verify buttons
     const keyboard = new InlineKeyboard()
-      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+      .url("📢 Join Updates Channel", CHANNEL_URL)
       .text("✅ Verify Membership", `verify_${ctx.from.id}`);
 
     await ctx.reply(welcomeMessage, { reply_markup: keyboard });
@@ -739,10 +753,10 @@ bot.command('register', async (ctx) => {
   if (!verifiedUsers.has(telegramId)) {
     // Create inline keyboard with join and verify buttons
     const keyboard = new InlineKeyboard()
-      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+      .url("📢 Join Updates Channel", CHANNEL_URL)
       .text("✅ Verify Membership", `verify_${telegramId}`);
 
-    await sendFormattedMessage(ctx, `❌ Channel membership required! You must join ${verificationChannel} and verify your membership before registering.\n\nPlease join the channel and click "Verify Membership" button below.`, keyboard);
+    await sendFormattedMessage(ctx, `❌ Channel membership required! You must join our channel and verify your membership before registering.\n\nPlease join the channel and click "Verify Membership" button below.`, keyboard);
     return;
   }
 
@@ -812,7 +826,9 @@ bot.command('register', async (ctx) => {
   await sendFormattedMessage(ctx, userMessage);
 });
 
-// Callback query handler for verification
+// ===============================
+// VERIFY BUTTON HANDLER
+// ===============================
 bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   const targetUserId = ctx.callbackQuery.data.split('_')[1];
@@ -829,15 +845,19 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
     return;
   }
 
+  await ctx.answerCallbackQuery('Checking membership…');
+
+  // ⏳ Telegram sync delay
+  await new Promise(r => setTimeout(r, 1500));
+
   // Check if user is a member of the verification channel
   const isMember = await checkChannelMembership(targetUserId);
   
   if (isMember) {
     verifiedUsers.add(targetUserId);
-    await ctx.answerCallbackQuery('✅ Verification successful! You can now register.');
     await ctx.editMessageText(`✅ Verification Successful ✅
 
-🎉 You have successfully verified your membership in ${verificationChannel}!
+🎉 You have successfully verified your membership in our channel!
 
 📋 Next Steps:
 • You can now use /register to submit your registration request
@@ -845,10 +865,9 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
 
 🚀 Thank you for joining our updates channel!`);
   } else {
-    await ctx.answerCallbackQuery('❌ Verification failed. Please join the channel first.');
     await ctx.editMessageText(`❌ Verification Failed ❌
 
-📋 You need to join ${verificationChannel} before you can register.
+📋 You need to join our channel before you can register.
 
 🔗 Join Channel:
 • Click the button below to join
@@ -856,7 +875,7 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
 
 📢 Channel membership is required for registration`, {
       reply_markup: new InlineKeyboard()
-        .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+        .url("📢 Join Updates Channel", CHANNEL_URL)
         .text("✅ Verify Membership", `verify_${targetUserId}`)
     });
   }
@@ -3032,7 +3051,7 @@ bot.command('checkstatus', async (ctx) => {
       } else {
         // Create inline keyboard with join and verify buttons
         const keyboard = new InlineKeyboard()
-          .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+          .url("📢 Join Updates Channel", CHANNEL_URL)
           .text("✅ Verify Membership", `verify_${telegramId}`);
         
         await sendFormattedMessage(ctx, '❌ No registration found.\n\nPlease join the updates channel and verify your membership before registering.', keyboard);
@@ -3076,6 +3095,25 @@ bot.command('sync', async (ctx) => {
   await sendFormattedMessage(ctx, '❌ No approved registration found.\n\n📋 If you were made admin but lost access:\n• Contact the original admin (@fuck_sake)\n• Or use /register to submit new request\n\n💡 Made admins lose access if bot restarts - this is normal for security.');
 });
 
+// ===============================
+// SAMPLE PROTECTED COMMAND
+// ===============================
+bot.command('ping', (ctx) => {
+  ctx.reply('🏓 Pong! You are verified.');
+});
+
+// ===============================
+// DEBUG COMMAND (OPTIONAL)
+// ===============================
+bot.command('test', async (ctx) => {
+  try {
+    const member = await bot.api.getChatMember(CHANNEL_ID, ctx.from.id);
+    ctx.reply(`Status: ${member.status}`);
+  } catch (e) {
+    ctx.reply(`Error: ${e.description || e.message}`);
+  }
+});
+
 // Test command
 bot.command('test', async (ctx) => {
   await sendFormattedMessage(ctx, '✅ Bot is working! 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
@@ -3109,7 +3147,9 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// Start bot with conflict detection
+// ===============================
+// START BOT
+// ===============================
 console.log('🚀 Starting Premium OSINT Bot with Complete Admin Panel & Registration Management...');
 console.log(`🤖 Bot Username: @OsintShit_Bot`);
 console.log(`👑 Admin ID: ${adminId}`);
