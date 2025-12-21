@@ -52,7 +52,7 @@ users.set(adminId, {
   registrationDate: new Date()
 });
 
-// Function to check if user is a member of the verification channel
+// Function to check if user is a member of verification channel
 async function checkChannelMembership(userId) {
   try {
     const chatMember = await bot.api.getChatMember(verificationChannel, userId);
@@ -595,11 +595,11 @@ bot.command('start', async (ctx) => {
   const user = getOrCreateUser(ctx);
   
   if (!user.isApproved) {
-    const welcomeMessage = `🚀 **Welcome to Premium OSINT Bot** 🚀
+    const welcomeMessage = `🚀 Welcome to Premium OSINT Bot 🚀
 
-✨ *Your Ultimate Open Source Intelligence Assistant* ✨
+✨ Your Ultimate Open Source Intelligence Assistant ✨
 
-📋 **Registration Required** 📋
+📋 Registration Required 📋
 
 Your account is pending approval by our admin team. 
 
@@ -609,9 +609,9 @@ Your account is pending approval by our admin team.
 🔹 You'll be notified once approved
 🔹 Premium features will be available after approval
 
-⚡ *Powered by Advanced AI Technology* ⚡
+⚡ Powered by Advanced AI Technology ⚡
 
-🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
+🛡️ Educational Purpose Only - Use Responsibly 🛡️`;
 
     // Create inline keyboard with join and verify buttons
     const keyboard = new InlineKeyboard()
@@ -622,11 +622,11 @@ Your account is pending approval by our admin team.
     return;
   }
 
-  const welcomeMessage = `🚀 **Welcome to Premium OSINT Bot** 🚀
+  const welcomeMessage = `🚀 Welcome to Premium OSINT Bot 🚀
 
-✨ *Your Ultimate Open Source Intelligence Assistant* ✨
+✨ Your Ultimate Open Source Intelligence Assistant ✨
 
-🔍 **Advanced Lookup Tools:**
+🔍 Advanced Lookup Tools:
 • /ip <address> - IP intelligence
 • /email <email> - Email validation
 • /num <number> - Phone number lookup
@@ -637,7 +637,7 @@ Your account is pending approval by our admin team.
 • /vehicle <number> - Vehicle details
 • /ff <uid> - Free Fire stats
 
-📱 **Social Media Video Downloaders:**
+📱 Social Media Video Downloaders:
 • /dl <url> - Universal video downloader (auto-detects platform)
 • /snap <url> - Snapchat video downloader
 • /insta <url> - Instagram video downloader
@@ -645,7 +645,7 @@ Your account is pending approval by our admin team.
 • /fb <url> - Facebook video downloader
 • /terabox <url> - TeraBox video downloader
 
-📊 **System Commands:**
+📊 System Commands:
 • /myip - Your IP information
 • /useragent - Browser info
 • /tempmail - Temporary email
@@ -655,17 +655,17 @@ Your account is pending approval by our admin team.
 • /sync - Sync registration (if approved but lost access)
 • /help - Show this help message
 
-💎 **Premium Features:**
+💎 Premium Features:
  ${user.isPremium ? '✅ Unlimited queries' : '🔒 Upgrade for unlimited queries'}
  ${user.isPremium ? '✅ Priority API access' : '🔒 Priority processing'}
  ${user.isPremium ? '✅ Advanced tools' : '🔒 Advanced features'}
  ${user.isPremium ? '✅ 24/7 support' : '🔒 Premium support'}
 
-💳 **Your Credits:** ${user.credits} 🪙
+💳 Your Credits: ${user.credits} 🪙
 
-⚡ *Powered by Advanced AI Technology* ⚡
+⚡ Powered by Advanced AI Technology ⚡
 
-🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
+🛡️ Educational Purpose Only - Use Responsibly 🛡️`;
 
   await sendFormattedMessage(ctx, welcomeMessage);
 });
@@ -686,19 +686,19 @@ bot.command('register', async (ctx) => {
       .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
       .text("✅ Verify Membership", `verify_${telegramId}`);
 
-    await sendFormattedMessage(ctx, `❌ *Channel membership required!* You must join ${verificationChannel} and verify your membership before registering.\n\nPlease join the channel and click the "Verify Membership" button below.`, keyboard);
+    await sendFormattedMessage(ctx, `❌ Channel membership required! You must join ${verificationChannel} and verify your membership before registering.\n\nPlease join the channel and click "Verify Membership" button below.`, keyboard);
     return;
   }
 
   const user = users.get(telegramId);
   
   if (user && user.isApproved) {
-    await sendFormattedMessage(ctx, '✅ *Your account is already approved!* You can use all bot features.');
+    await sendFormattedMessage(ctx, '✅ Your account is already approved! You can use all bot features.');
     return;
   }
 
   if (registrationRequests.has(telegramId)) {
-    await sendFormattedMessage(ctx, '⏳ *Your registration is already pending approval.*\n\nPlease wait for the admin to review your request.');
+    await sendFormattedMessage(ctx, '⏳ Your registration is already pending approval.\n\nPlease wait for the admin to review your request.');
     return;
   }
 
@@ -713,18 +713,18 @@ bot.command('register', async (ctx) => {
   });
 
   // Notify admin with inline keyboard
-  const adminMessage = `📋 **New Registration Request** 📋
+  const adminMessage = `📋 New Registration Request 📋
 
-👤 **User Information:**
+👤 User Information:
 • Telegram ID: ${telegramId}
 • Username: @${username || 'N/A'}
 • Name: ${firstName || ''} ${lastName || ''}
 
-📅 **Request Details:**
+📅 Request Details:
 • Status: ⏳ Pending
 • Date: ${new Date().toLocaleDateString()}
 
-🎯 **Actions:**
+🎯 Actions:
 • Approve or Reject below`;
 
   const keyboard = new InlineKeyboard()
@@ -733,25 +733,25 @@ bot.command('register', async (ctx) => {
 
   await notifyAdmin(adminMessage, keyboard);
 
-  const userMessage = `📋 **Registration Submitted** 📋
+  const userMessage = `📋 Registration Submitted 📋
 
-✅ *Your registration request has been submitted successfully!*
+✅ Your registration request has been submitted successfully!
 
-👤 **Your Details:**
+👤 Your Details:
 • Telegram ID: ${telegramId}
 • Username: @${username || 'N/A'}
 
-⏳ **Next Steps:**
+⏳ Next Steps:
 • Your request is now pending admin approval
 • You'll receive a notification once reviewed
 • Approval typically takes 24-48 hours
 
-💎 **After Approval:**
+💎 After Approval:
 • Full access to all OSINT tools
 • Starting credits balance
 • Premium features available
 
-🔔 *You'll be notified when your registration is processed*`;
+🔔 You'll be notified when your registration is processed`;
 
   await sendFormattedMessage(ctx, userMessage);
 });
@@ -779,26 +779,26 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
   if (isMember) {
     verifiedUsers.add(targetUserId);
     await ctx.answerCallbackQuery('✅ Verification successful! You can now register.');
-    await ctx.editMessageText(`✅ **Verification Successful** ✅
+    await ctx.editMessageText(`✅ Verification Successful ✅
 
-🎉 *You have successfully verified your membership in ${verificationChannel}!*
+🎉 You have successfully verified your membership in ${verificationChannel}!
 
-📋 **Next Steps:**
+📋 Next Steps:
 • You can now use /register to submit your registration request
 • Your verification status has been saved
 
-🚀 *Thank you for joining our updates channel!*`);
+🚀 Thank you for joining our updates channel!`);
   } else {
     await ctx.answerCallbackQuery('❌ Verification failed. Please join the channel first.');
-    await ctx.editMessageText(`❌ **Verification Failed** ❌
+    await ctx.editMessageText(`❌ Verification Failed ❌
 
-📋 *You need to join ${verificationChannel} before you can register.*
+📋 You need to join ${verificationChannel} before you can register.
 
-🔗 **Join Channel:**
+🔗 Join Channel:
 • Click the button below to join
 • After joining, click "Verify Membership" again
 
-📢 *Channel membership is required for registration*`, {
+📢 Channel membership is required for registration`, {
       reply_markup: new InlineKeyboard()
         .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
         .text("✅ Verify Membership", `verify_${targetUserId}`)
@@ -850,59 +850,59 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
     users.set(targetUserId, user);
     registrationRequests.delete(targetUserId);
 
-    const userMessage = `🎉 **Registration Approved!** 🎉
+    const userMessage = `🎉 Registration Approved! 🎉
 
-✅ *Congratulations! Your registration has been approved.*
+✅ Congratulations! Your registration has been approved.
 
-💎 **Welcome Benefits:**
+💎 Welcome Benefits:
 • 25 starting credits 🪙
 • Full access to all OSINT tools
 • Premium features available
 
-🚀 **Get Started:**
+🚀 Get Started:
 • Use /start to see all available commands
 • Try /help for detailed instructions
 • Check /credits to see your balance
 
-⚡ *Thank you for joining our OSINT community!*`;
+⚡ Thank you for joining our OSINT community!`;
 
     await notifyUser(targetUserId, userMessage);
     await ctx.answerCallbackQuery('✅ Registration approved successfully!');
     
     // Update the message
-    await ctx.editMessageText(`✅ **Registration Approved** ✅
+    await ctx.editMessageText(`✅ Registration Approved ✅
 
-👤 **User:** @${user.username || 'N/A'} (${targetUserId})
-📅 **Processed:** ${new Date().toLocaleDateString()}
-🎯 **Status:** Approved
+👤 User: @${user.username || 'N/A'} (${targetUserId})
+📅 Processed: ${new Date().toLocaleDateString()}
+🎯 Status: Approved
 
-*Processed by:* @${ctx.from?.username || 'Admin'}`);
+Processed by: @${ctx.from?.username || 'Admin'}`);
 
   } else if (action === 'reject') {
     registrationRequests.delete(targetUserId);
 
-    const userMessage = `❌ **Registration Rejected** ❌
+    const userMessage = `❌ Registration Rejected ❌
 
-📋 *Your registration request has been rejected.*
+📋 Your registration request has been rejected.
 
-📞 **Next Steps:**
+📞 Next Steps:
 • Contact the admin for more information
 • Review registration requirements
 • You may submit a new request if needed
 
-💡 *If you believe this is an error, please reach out to our support team*`;
+💡 If you believe this is an error, please reach out to our support team`;
 
     await notifyUser(targetUserId, userMessage);
     await ctx.answerCallbackQuery('❌ Registration rejected');
     
     // Update the message
-    await ctx.editMessageText(`❌ **Registration Rejected** ❌
+    await ctx.editMessageText(`❌ Registration Rejected ❌
 
-👤 **User:** @${user.username || 'N/A'} (${targetUserId})
-📅 **Processed:** ${new Date().toLocaleDateString()}
-🎯 **Status:** Rejected
+👤 User: @${user.username || 'N/A'} (${targetUserId})
+📅 Processed: ${new Date().toLocaleDateString()}
+🎯 Status: Rejected
 
-*Processed by:* @${ctx.from?.username || 'Admin'}`);
+Processed by: @${ctx.from?.username || 'Admin'}`);
   }
 });
 
@@ -963,10 +963,10 @@ bot.command('snap', async (ctx) => {
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    return sendFormattedMessage(ctx, '🦼 *Usage: /snap <Snapchat video URL>*');
+    return sendFormattedMessage(ctx, '🦼 Usage: /snap <Snapchat video URL>');
   }
 
-  await sendFormattedMessage(ctx, '🦼 *Downloading Snapchat video...*');
+  await sendFormattedMessage(ctx, '🦼 Downloading Snapchat video...');
 
   try {
     const success = await handleSingleVideo(ctx, videoUrl, 'snap');
@@ -994,10 +994,10 @@ bot.command('insta', async (ctx) => {
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    return sendFormattedMessage(ctx, '💎 *Usage: /insta <Instagram video URL>*');
+    return sendFormattedMessage(ctx, '💎 Usage: /insta <Instagram video URL>');
   }
 
-  await sendFormattedMessage(ctx, '💎 *Downloading Instagram video...*');
+  await sendFormattedMessage(ctx, '💎 Downloading Instagram video...');
 
   try {
     const success = await handleSingleVideo(ctx, videoUrl, 'insta');
@@ -1025,10 +1025,10 @@ bot.command('pin', async (ctx) => {
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    return sendFormattedMessage(ctx, '❤️ *Usage: /pin <Pinterest video URL>*');
+    return sendFormattedMessage(ctx, '❤️ Usage: /pin <Pinterest video URL>');
   }
 
-  await sendFormattedMessage(ctx, '❤️ *Downloading Pinterest video...*');
+  await sendFormattedMessage(ctx, '❤️ Downloading Pinterest video...');
 
   try {
     const success = await handleSingleVideo(ctx, videoUrl, 'pin');
@@ -1056,10 +1056,10 @@ bot.command('fb', async (ctx) => {
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    return sendFormattedMessage(ctx, '❤️ *Usage: /fb <Facebook video URL>*');
+    return sendFormattedMessage(ctx, '❤️ Usage: /fb <Facebook video URL>');
   }
 
-  await sendFormattedMessage(ctx, '❤️ *Downloading Facebook video...*');
+  await sendFormattedMessage(ctx, '❤️ Downloading Facebook video...');
 
   try {
     const success = await handleSingleVideo(ctx, videoUrl, 'fb');
@@ -1087,10 +1087,10 @@ bot.command('terabox', async (ctx) => {
 
   const videoUrl = ctx.match;
   if (!videoUrl) {
-    return sendFormattedMessage(ctx, '📁 *Usage: /terabox <TeraBox video URL>*');
+    return sendFormattedMessage(ctx, '📁 Usage: /terabox <TeraBox video URL>');
   }
 
-  await sendFormattedMessage(ctx, '📁 *Processing TeraBox link...*');
+  await sendFormattedMessage(ctx, '📁 Processing TeraBox link...');
 
   try {
     const success = await handleTeraBox(ctx, videoUrl);
@@ -1121,19 +1121,19 @@ bot.command('ip', async (ctx) => {
   }
 
   const ip = ctx.match || 'self';
-  await sendFormattedMessage(ctx, '🔍 *Fetching IP intelligence...*');
+  await sendFormattedMessage(ctx, '🔍 Fetching IP intelligence...');
 
   try {
     const result = await getIpInfo(ip === 'self' ? undefined : ip.toString());
     
     if (result.success && result.data) {
-      const response = `🌐 **IP Intelligence Results** 🌐
+      const response = `🌐 IP Intelligence Results 🌐
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *IP information for educational purposes only*
+💡 IP information for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1166,23 +1166,23 @@ bot.command('email', async (ctx) => {
 
   const email = ctx.match;
   if (!email) {
-    await sendFormattedMessage(ctx, '📧 *Usage: /email <email address>*\n\nExample: /email user@example.com');
+    await sendFormattedMessage(ctx, '📧 Usage: /email <email address>\n\nExample: /email user@example.com');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Validating email address...*');
+  await sendFormattedMessage(ctx, '🔍 Validating email address...');
 
   try {
     const result = await validateEmail(email.toString());
     
     if (result.success && result.data) {
-      const response = `📧 **Email Validation Results** 📧
+      const response = `📧 Email Validation Results 📧
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Email validation for educational purposes only*
+💡 Email validation for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1215,23 +1215,23 @@ bot.command('num', async (ctx) => {
 
   const number = ctx.match;
   if (!number) {
-    await sendFormattedMessage(ctx, '📱 *Usage: /num <phone number>*\n\nExample: /num 9389482769');
+    await sendFormattedMessage(ctx, '📱 Usage: /num <phone number>\n\nExample: /num 9389482769');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Looking up phone number...*');
+  await sendFormattedMessage(ctx, '🔍 Looking up phone number...');
 
   try {
     const result = await getPhoneNumberInfo(number.toString());
     
     if (result.success && result.data) {
-      const response = `📱 **Phone Number Lookup Results** 📱
+      const response = `📱 Phone Number Lookup Results 📱
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Phone number information for educational purposes only*
+💡 Phone number information for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1264,23 +1264,23 @@ bot.command('basicnum', async (ctx) => {
 
   const number = ctx.match;
   if (!number) {
-    await sendFormattedMessage(ctx, '📱 *Usage: /basicnum <phone number>*\n\nExample: /basicnum 919087654321');
+    await sendFormattedMessage(ctx, '📱 Usage: /basicnum <phone number>\n\nExample: /basicnum 919087654321');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Getting basic number information...*');
+  await sendFormattedMessage(ctx, '🔍 Getting basic number information...');
 
   try {
     const result = await getBasicNumberInfo(number.toString());
     
     if (result.success && result.data) {
-      const response = `📱 **Basic Number Information** 📱
+      const response = `📱 Basic Number Information 📱
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Basic number information for educational purposes only*
+💡 Basic number information for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1313,23 +1313,23 @@ bot.command('paknum', async (ctx) => {
 
   const number = ctx.match;
   if (!number) {
-    await sendFormattedMessage(ctx, '📱 *Usage: /paknum <Pakistani number>*\n\nExample: /paknum 03005854962');
+    await sendFormattedMessage(ctx, '📱 Usage: /paknum <Pakistani number>\n\nExample: /paknum 03005854962');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Looking up Pakistani number...*');
+  await sendFormattedMessage(ctx, '🔍 Looking up Pakistani number...');
 
   try {
     const result = await getPakistaniNumberInfo(number.toString());
     
     if (result.success && result.data) {
-      const response = `📱 **Pakistani Number Lookup Results** 📱
+      const response = `📱 Pakistani Number Lookup Results 📱
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Pakistani number information for educational purposes only*
+💡 Pakistani number information for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1362,23 +1362,23 @@ bot.command('ig', async (ctx) => {
 
   const username = ctx.match;
   if (!username) {
-    await sendFormattedMessage(ctx, '📷 *Usage: /ig <Instagram username>*\n\nExample: /ig instagram');
+    await sendFormattedMessage(ctx, '📷 Usage: /ig <Instagram username>\n\nExample: /ig instagram');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Fetching Instagram intelligence...*');
+  await sendFormattedMessage(ctx, '🔍 Fetching Instagram intelligence...');
 
   try {
     const result = await getInstagramInfo(username.toString());
     
     if (result.success && result.data) {
-      const response = `📷 **Instagram Intelligence Results** 📷
+      const response = `📷 Instagram Intelligence Results 📷
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Instagram information for educational purposes only*
+💡 Instagram information for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1411,23 +1411,23 @@ bot.command('bin', async (ctx) => {
 
   const bin = ctx.match;
   if (!bin) {
-    await sendFormattedMessage(ctx, '💳 *Usage: /bin <BIN number>*\n\nExample: /bin 460075');
+    await sendFormattedMessage(ctx, '💳 Usage: /bin <BIN number>\n\nExample: /bin 460075');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Looking up BIN information...*');
+  await sendFormattedMessage(ctx, '🔍 Looking up BIN information...');
 
   try {
     const result = await getBinInfo(bin.toString());
     
     if (result.success && result.data) {
-      const response = `💳 **BIN Lookup Results** 💳
+      const response = `💳 BIN Lookup Results 💳
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *BIN information for educational purposes only*
+💡 BIN information for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1460,23 +1460,23 @@ bot.command('vehicle', async (ctx) => {
 
   const vehicle = ctx.match;
   if (!vehicle) {
-    await sendFormattedMessage(ctx, '🚗 *Usage: /vehicle <vehicle number>*\n\nExample: /vehicle MH04KA0151');
+    await sendFormattedMessage(ctx, '🚗 Usage: /vehicle <vehicle number>\n\nExample: /vehicle MH04KA0151');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Fetching vehicle details...*');
+  await sendFormattedMessage(ctx, '🔍 Fetching vehicle details...');
 
   try {
     const result = await getVehicleInfo(vehicle.toString());
     
     if (result.success && result.data) {
-      const response = `🚗 **Vehicle Details Results** 🚗
+      const response = `🚗 Vehicle Details Results 🚗
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Vehicle information for educational purposes only*
+💡 Vehicle information for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1509,23 +1509,23 @@ bot.command('ff', async (ctx) => {
 
   const uid = ctx.match;
   if (!uid) {
-    await sendFormattedMessage(ctx, '🎮 *Usage: /ff <Free Fire UID>*\n\nExample: /ff 2819649271');
+    await sendFormattedMessage(ctx, '🎮 Usage: /ff <Free Fire UID>\n\nExample: /ff 2819649271');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Fetching Free Fire statistics...*');
+  await sendFormattedMessage(ctx, '🔍 Fetching Free Fire statistics...');
 
   try {
     const result = await getFreeFireStats(uid.toString());
     
     if (result.success && result.data) {
-      const response = `🎮 **Free Fire Statistics Results** 🎮
+      const response = `🎮 Free Fire Statistics Results 🎮
 
 \`\`\`json
  ${JSON.stringify(result.data, null, 2)}
 \`\`\`
 
-💡 *Free Fire statistics for educational purposes only*
+💡 Free Fire statistics for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1550,7 +1550,7 @@ bot.command('myip', async (ctx) => {
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 *Fetching your IP information...*');
+  await sendFormattedMessage(ctx, '🔍 Fetching your IP information...');
 
   try {
     const result = await getIpInfo();
@@ -1563,9 +1563,9 @@ bot.command('myip', async (ctx) => {
       const org = result.data.org || 'Unknown';
       const timezone = result.data.timezone || 'Unknown';
 
-      const response = `🌐 **Your IP Information** 🌐
+      const response = `🌐 Your IP Information 🌐
 
-📍 **Location Details:**
+📍 Location Details:
 • IP Address: \`${ip}\`
 • City: ${city}
 • Region: ${region}
@@ -1573,11 +1573,11 @@ bot.command('myip', async (ctx) => {
 • Organization: ${org}
 • Timezone: ${timezone}
 
-🔍 **Network Information:**
+🔍 Network Information:
 • ISP: ${org}
 • Connection Type: Detected
 
-💡 *This information is for educational purposes only*`;
+💡 This information is for educational purposes only`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
@@ -1601,18 +1601,18 @@ bot.command('useragent', async (ctx) => {
     const result = getUserAgentInfo();
     
     if (result.success && result.data) {
-      const response = `🖥️ **Browser & System Information** 🖥️
+      const response = `🖥️ Browser & System Information 🖥️
 
-🌐 **Browser Details:**
+🌐 Browser Details:
 • Browser: ${result.data.browser}
 • Version: ${result.data.version}
 • Platform: ${result.data.platform}
 • Mobile: ${result.data.mobile ? 'Yes' : 'No'}
 
-📱 **User Agent String:**
+📱 User Agent String:
 \`${result.data.user_agent}\`
 
-💡 *This is the bot's user agent information*`;
+💡 This is the bot's user agent information`;
 
       await sendFormattedMessage(ctx, response);
     } else {
@@ -1635,22 +1635,22 @@ bot.command('tempmail', async (ctx) => {
     const result = generateTempEmail();
     
     if (result.success && result.data) {
-      const response = `📧 **Temporary Email Generated** 📧
+      const response = `📧 Temporary Email Generated 📧
 
-🔑 **Email Address:**
+🔑 Email Address:
 \`${result.data.email}\`
 
-⏰ **Details:**
+⏰ Details:
 • Expires in: ${result.data.expires_in}
 • Domain: ${result.data.domain}
 
-💡 **Important Notes:**
+💡 Important Notes:
 • This email will expire automatically
 • Use for temporary registrations only
 • Don't use for important communications
 • Check the inbox regularly
 
-🔒 *Privacy protected - No logs stored*`;
+🔒 Privacy protected - No logs stored`;
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
@@ -1670,15 +1670,15 @@ bot.command('stats', async (ctx) => {
     return;
   }
 
-  const response = `📊 **Your Usage Statistics** 📊
+  const response = `📊 Your Usage Statistics 📊
 
-👤 **Account Information:**
+👤 Account Information:
 • Username: @${user.username || 'N/A'}
 • Status: ${user.isPremium ? '💎 Premium' : '🔹 Standard'}
 • Credits: ${user.credits} 🪙
 • Member Since: ${user.registrationDate.toLocaleDateString()}
 
-📈 **Usage Statistics:**
+📈 Usage Statistics:
 • Total Queries: ${user.totalQueries}
 • Credits Available: ${user.credits}
 
@@ -1694,49 +1694,49 @@ bot.command('credits', async (ctx) => {
     return;
   }
 
-  const response = `💳 **Credit Information** 💳
+  const response = `💳 Credit Information 💳
 
-🪙 **Current Balance:** ${user.credits} credits
+🪙 Current Balance: ${user.credits} credits
 
-👤 **Account Status:**
+👤 Account Status:
  ${user.isPremium ? '💎 Premium Member' : '🔹 Standard Member'}
  ${user.isPremium ? '✅ Unlimited queries' : `📊 Daily limit: ${user.credits} queries`}
 
-📈 **Usage Statistics:**
+📈 Usage Statistics:
 • Total Queries: ${user.totalQueries}
 • Credits Available: ${user.credits}
 
-🎁 **Want more credits?**
+🎁 Want more credits?
 • Upgrade to Premium for unlimited access
 • Contact admin for credit requests
 
-💡 *Each query consumes 1 credit*`;
+💡 Each query consumes 1 credit`;
 
   await sendFormattedMessage(ctx, response);
 });
 
 // Help command
 bot.command('help', async (ctx) => {
-  const helpMessage = `📖 **Premium OSINT Bot - Complete Guide** 📖
+  const helpMessage = `📖 Premium OSINT Bot - Complete Guide 📖
 
-🔍 **OSINT Lookup Commands:**
+🔍 OSINT Lookup Commands:
 
-📱 **Device & Network:**
+📱 Device & Network:
 • /ip <address> - IP geolocation and intelligence
 • /bin <number> - Bank Identification Number lookup
 
-👤 **Social & Contact:**
+👤 Social & Contact:
 • /email <email> - Email validation and analysis
 • /num <number> - International phone lookup
 • /basicnum <number> - Basic number information
 • /paknum <number> - Pakistani number details
 • /ig <username> - Instagram profile intelligence
 
-🚗 **Vehicle & Gaming:**
+🚗 Vehicle & Gaming:
 • /vehicle <number> - Vehicle registration details
 • /ff <uid> - Free Fire player statistics
 
-📱 **Social Media Video Downloaders:**
+📱 Social Media Video Downloaders:
 • /dl <url> - Universal video downloader (auto-detects platform)
 • /snap <url> - Snapchat video downloader
 • /insta <url> - Instagram video downloader
@@ -1744,7 +1744,7 @@ bot.command('help', async (ctx) => {
 • /fb <url> - Facebook video downloader
 • /terabox <url> - TeraBox video downloader
 
-📊 **System Commands:**
+📊 System Commands:
 • /myip - Get your current IP information
 • /useragent - Browser and system information
 • /tempmail - Generate temporary email address
@@ -1753,14 +1753,14 @@ bot.command('help', async (ctx) => {
 • /checkstatus - Check registration status
 • /sync - Sync registration (if approved but lost access)
 
-💎 **Premium Benefits:**
+💎 Premium Benefits:
 • 🔄 Unlimited queries per day
 • ⚡ Priority API access
 • 🔧 Advanced lookup tools
 • 📞 24/7 premium support
 • 🎯 Higher rate limits
 
-📝 **Usage Examples:**
+📝 Usage Examples:
 • /ip 8.8.8.8
 • /email user@example.com
 • /num 9389482769
@@ -1772,14 +1772,14 @@ bot.command('help', async (ctx) => {
 • /pin https://pin.it/4gsJMxtt1
 • /fb https://www.facebook.com/reel/1157396829623170/
 
-⚠️ **Important Notes:**
+⚠️ Important Notes:
 • Each query consumes 1 credit
 • Results are for educational purposes only
 • Use responsibly and legally
 • Respect privacy laws
 • Videos larger than 50MB will be sent as download links
 
-🛡️ *Educational Purpose Only - Use Responsibly* 🛡️`;
+🛡️ Educational Purpose Only - Use Responsibly 🛡️`;
 
   await sendFormattedMessage(ctx, helpMessage);
 });
@@ -1801,16 +1801,16 @@ bot.command('admin', async (ctx) => {
   const approvedUsers = Array.from(users.values()).filter(u => u.isApproved).length;
   const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
 
-  const adminPanel = `🌟 ⚡ **ELITE ADMIN CONTROL PANEL** ⚡ 🌟
+  const adminPanel = `🌟 ⚡ ELITE ADMIN CONTROL PANEL ⚡ 🌟
 
-💎 💰 **Credit Management Commands:**
+💎 💰 Credit Management Commands:
 • /give <user_id> <amount> - 🎁 Grant credits to user
 • /remove <user_id> <amount> - 💸 Remove credits from user
 • /giveall <amount> - 🌍 Bless all users with credits
 • /removeall <amount> - 🗑️ Clear credits from all users
 • /setcredits <user_id> <amount> - 🎯 Set exact credit amount
 
-👑 👥 **User Management:**
+👑 👥 User Management:
 • /premium <user_id> - ⭐ Toggle premium status
 • /checkuser <user_id> - 🔍 Inspect user details
 • /users - 📋 List all users (premium first)
@@ -1819,41 +1819,41 @@ bot.command('admin', async (ctx) => {
 • /makeadmin <user_id> - 👑 Make user admin
 • /removeadmin <user_id> - 🚫 Remove admin status
 
-📋 📝 **Registration Management:**
+📋 📝 Registration Management:
 • /registrations - 📋 View pending registrations
 • /approve <user_id> - ✅ Approve registration
 • /reject <user_id> - ❌ Reject registration
 • /approveall - ✅ Approve all pending registrations
 
-📊 📈 **Statistics & Analytics:**
+📊 📈 Statistics & Analytics:
 • /stats - 📊 Complete bot statistics
 • /adminstats - 🎯 Admin-only analytics
 • /activity - 📈 Recent activity log
 • /revenue - 💰 Premium revenue stats
 
-🎮 🔧 **System Controls:**
+🎮 🔧 System Controls:
 • /broadcast <message> - 📢 Send broadcast to all
 • /announce <title>|<message> - 🎭 Rich announcement
 • /reset_daily - 🔄 Reset daily statistics
 • /lucky - 🍀 Random user bonus
 • /maintenance <on|off|message> - ⚙️ Toggle maintenance mode
 
-🔥 🎯 **Advanced Tools:**
+🔥 🎯 Advanced Tools:
 • /masspremium - 👑 Mass premium upgrade
 • /resetuser <user_id> - 🔄 Reset user account
 • /logs - 📜 View system logs
 • /backup - 💾 Create database backup
 
-📊 **Current Statistics:**
+📊 Current Statistics:
 • 👥 Total Users: ${totalUsers}
 • ✅ Approved Users: ${approvedUsers}
 • 💎 Premium Users: ${premiumUsers}
 • ⏳ Pending Registrations: ${pendingCount}
 • 🔧 Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
 
-⚡ 🌟 **Unlimited Power • Unlimited Possibilities** 🌟 ⚡
+⚡ 🌟 Unlimited Power • Unlimited Possibilities 🌟 ⚡
 
-🔐 *Admin access verified*`;
+🔐 Admin access verified`;
 
   await sendFormattedMessage(ctx, adminPanel);
 });
@@ -1869,7 +1869,7 @@ bot.command('give', async (ctx) => {
 
   const args = ctx.match?.toString().split(' ');
   if (!args || args.length < 2) {
-    await sendFormattedMessage(ctx, '💎 *Usage: /give <user_id> <amount>*\n\nExample: /give 123456789 500');
+    await sendFormattedMessage(ctx, '💎 Usage: /give <user_id> <amount>\n\nExample: /give 123456789 500');
     return;
   }
 
@@ -1889,25 +1889,25 @@ bot.command('give', async (ctx) => {
 
   targetUser.credits += amount;
 
-  const userMessage = `🎉 **Credits Received!** 🎉
+  const userMessage = `🎉 Credits Received! 🎉
 
-💰 **Amount:** +${amount} credits
-💳 **New Balance:** ${targetUser.credits} credits
-👤 **From:** Admin
+💰 Amount: +${amount} credits
+💳 New Balance: ${targetUser.credits} credits
+👤 From: Admin
 
-✨ *Enjoy your credits! Use them wisely for OSINT lookups.*`;
+✨ Enjoy your credits! Use them wisely for OSINT lookups.`;
 
   await notifyUser(targetUserId, userMessage);
 
-  const adminMessage = `💎 **Credits Granted Successfully** 💎
+  const adminMessage = `💎 Credits Granted Successfully 💎
 
-✅ **Transaction Details:**
+✅ Transaction Details:
 • User ID: ${targetUserId}
 • Amount: ${amount} credits
 • New Balance: ${targetUser.credits} credits
 • Admin: @${ctx.from?.username}
 
-🎯 *User has been notified about the credit grant*`;
+🎯 User has been notified about the credit grant`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -1922,7 +1922,7 @@ bot.command('premium', async (ctx) => {
 
   const targetUserId = ctx.match?.toString();
   if (!targetUserId) {
-    await sendFormattedMessage(ctx, '⭐ *Usage: /premium <user_id>*\n\nExample: /premium 123456789');
+    await sendFormattedMessage(ctx, '⭐ Usage: /premium <user_id>\n\nExample: /premium 123456789');
     return;
   }
 
@@ -1936,37 +1936,37 @@ bot.command('premium', async (ctx) => {
   const action = targetUser.isPremium ? 'granted' : 'revoked';
 
   const userMessage = targetUser.isPremium ? 
-    `🎉 **Premium Status Granted!** 🎉
+    `🎉 Premium Status Granted! 🎉
 
-💎 **Welcome to Premium!**
+💎 Welcome to Premium!
 ✅ Unlimited queries
 ⚡ Priority API access
 🔧 Advanced tools
 📞 24/7 support
 
-🌟 *Thank you for upgrading to Premium!*
+🌟 Thank you for upgrading to Premium!
 
-💎 *Enjoy your exclusive benefits!*` :
-    `💳 **Premium Status Revoked** 💳
+💎 Enjoy your exclusive benefits!` :
+    `💳 Premium Status Revoked 💳
 
-📋 **Status Changed:**
+📋 Status Changed:
 • Premium access revoked
 • Back to standard features
 • Contact admin for details
 
-📞 *If you have questions, please reach out to support*`;
+📞 If you have questions, please reach out to support`;
 
   await notifyUser(targetUserId, userMessage);
 
-  const adminMessage = `⭐ **Premium Status Updated** ⭐
+  const adminMessage = `⭐ Premium Status Updated ⭐
 
-✅ **Action Details:**
+✅ Action Details:
 • User ID: ${targetUserId}
 • Action: Premium ${action}
 • New Status: ${targetUser.isPremium ? '💎 Premium' : '🔹 Standard'}
 • Admin: @${ctx.from?.username}
 
-🎯 *User has been notified about the status change*`;
+🎯 User has been notified about the status change`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -1981,7 +1981,7 @@ bot.command('makeadmin', async (ctx) => {
 
   const targetUserId = ctx.match?.toString();
   if (!targetUserId) {
-    await sendFormattedMessage(ctx, '👑 *Usage: /makeadmin <user_id>*\n\nExample: /makeadmin 123456789');
+    await sendFormattedMessage(ctx, '👑 Usage: /makeadmin <user_id>\n\nExample: /makeadmin 123456789');
     return;
   }
 
@@ -1998,31 +1998,31 @@ bot.command('makeadmin', async (ctx) => {
 
   targetUser.isAdmin = true;
 
-  const userMessage = `👑 **Admin Access Granted!** 👑
+  const userMessage = `👑 Admin Access Granted! 👑
 
-🎉 **Congratulations!**
+🎉 Congratulations!
 ✅ Admin status granted
 🔧 Full admin access
 📋 Admin commands available
 
-🎯 **Get Started:**
+🎯 Get Started:
 • Use /admin to view all admin commands
 • Access user management tools
 • Control bot settings
 
-💎 *Welcome to the admin team!*`;
+💎 Welcome to the admin team!`;
 
   await notifyUser(targetUserId, userMessage);
 
-  const adminMessage = `👑 **Admin Access Granted** 👑
+  const adminMessage = `👑 Admin Access Granted 👑
 
-✅ **Action Details:**
+✅ Action Details:
 • User ID: ${targetUserId}
 • Username: @${targetUser.username || 'N/A'}
 • Action: Admin access granted
 • Admin: @${ctx.from?.username}
 
-🎯 *User has been notified about admin access*`;
+🎯 User has been notified about admin access`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2037,7 +2037,7 @@ bot.command('removeadmin', async (ctx) => {
 
   const targetUserId = ctx.match?.toString();
   if (!targetUserId) {
-    await sendFormattedMessage(ctx, '🚫 *Usage: /removeadmin <user_id>*\n\nExample: /removeadmin 123456789');
+    await sendFormattedMessage(ctx, '🚫 Usage: /removeadmin <user_id>\n\nExample: /removeadmin 123456789');
     return;
   }
 
@@ -2059,26 +2059,26 @@ bot.command('removeadmin', async (ctx) => {
 
   targetUser.isAdmin = false;
 
-  const userMessage = `🚫 **Admin Access Removed** 🚫
+  const userMessage = `🚫 Admin Access Removed 🚫
 
-📋 **Status Update:**
+📋 Status Update:
 • Admin access removed
 • Back to regular user
 • Contact main admin if needed
 
-📞 *If you have questions about this change, please reach out to the main admin*`;
+📞 If you have questions about this change, please reach out to the main admin`;
 
   await notifyUser(targetUserId, userMessage);
 
-  const adminMessage = `🚫 **Admin Access Removed** 🚫
+  const adminMessage = `🚫 Admin Access Removed 🚫
 
-✅ **Action Details:**
+✅ Action Details:
 • User ID: ${targetUserId}
 • Username: @${targetUser.username || 'N/A'}
 • Action: Admin access removed
 • Admin: @${ctx.from?.username}
 
-🎯 *User has been notified about admin removal*`;
+🎯 User has been notified about admin removal`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2093,7 +2093,7 @@ bot.command('checkuser', async (ctx) => {
 
   const targetUserId = ctx.match?.toString();
   if (!targetUserId) {
-    await sendFormattedMessage(ctx, '🔍 *Usage: /checkuser <user_id>*\n\nExample: /checkuser 123456789');
+    await sendFormattedMessage(ctx, '🔍 Usage: /checkuser <user_id>\n\nExample: /checkuser 123456789');
     return;
   }
 
@@ -2103,24 +2103,24 @@ bot.command('checkuser', async (ctx) => {
     return;
   }
 
-  const userInfo = `🔍 **User Information** 🔍
+  const userInfo = `🔍 User Information 🔍
 
-👤 **Basic Details:**
+👤 Basic Details:
 • Telegram ID: ${targetUser.telegramId}
 • Username: @${targetUser.username || 'N/A'}
 • Name: ${targetUser.firstName || ''} ${targetUser.lastName || ''}
 • Registration: ${targetUser.registrationDate.toLocaleDateString()}
 
-📊 **Account Status:**
+📊 Account Status:
 • Approved: ${targetUser.isApproved ? '✅ Yes' : '❌ No'}
 • Premium: ${targetUser.isPremium ? '💎 Yes' : '🔹 No'}
 • Admin: ${targetUser.isAdmin ? '👑 Yes' : '🔹 No'}
 
-💳 **Credits & Usage:**
+💳 Credits & Usage:
 • Current Balance: ${targetUser.credits} credits
 • Total Queries: ${targetUser.totalQueries}
 
-📈 **Account Health:**
+📈 Account Health:
  ${targetUser.isApproved && targetUser.credits >= 0 ? '✅ Healthy' : '⚠️ Needs attention'}`;
 
   await sendFormattedMessage(ctx, userInfo);
@@ -2140,14 +2140,14 @@ bot.command('users', async (ctx) => {
     return `${index + 1}. ${status}${adminBadge} @${u.username || 'N/A'} (${u.telegramId}) - ${u.credits} credits`;
   }).join('\n');
 
-  const response = `📋 **User List** 📋
+  const response = `📋 User List 📋
 
-👥 **Total Users:** ${users.size}
-💎 **Premium Users:** ${Array.from(users.values()).filter(u => u.isPremium).length}
-✅ **Approved Users:** ${Array.from(users.values()).filter(u => u.isApproved).length}
-👑 **Admins:** ${Array.from(users.values()).filter(u => u.isAdmin).length}
+👥 Total Users: ${users.size}
+💎 Premium Users: ${Array.from(users.values()).filter(u => u.isPremium).length}
+✅ Approved Users: ${Array.from(users.values()).filter(u => u.isApproved).length}
+👑 Admins: ${Array.from(users.values()).filter(u => u.isAdmin).length}
 
-📊 **User Details:**
+📊 User Details:
  ${userList}
 
 💎 Legend: 💎 Premium | ✅ Approved | ⏳ Pending | 👑 Admin`;
@@ -2179,14 +2179,14 @@ bot.command('topusers', async (ctx) => {
     return `${medal} ${status} @${u.username || 'N/A'} - ${u.totalQueries} queries`;
   }).join('\n');
 
-  const response = `🏆 **Top 10 Users by Queries** 🏆
+  const response = `🏆 Top 10 Users by Queries 🏆
 
-📊 **Statistics:**
+📊 Statistics:
 • Total users shown: ${topUsers.length}
 • Premium users: ${topUsers.filter(u => u.isPremium).length}
 • Total queries: ${topUsers.reduce((sum, u) => sum + u.totalQueries, 0)}
 
-🎯 **Leaderboard:**
+🎯 Leaderboard:
  ${userList}
 
 💎 Legend: 💎 Premium | 🔹 Standard`;
@@ -2214,12 +2214,12 @@ bot.command('premiumlist', async (ctx) => {
     return `${index + 1}. 💎${adminBadge} @${u.username || 'N/A'} (${u.telegramId})`;
   }).join('\n');
 
-  const response = `💎 **Premium Members List** 💎
+  const response = `💎 Premium Members List 💎
 
-👥 **Total Premium Users:** ${premiumUsers.length}
-👑 **Premium Admins:** ${premiumUsers.filter(u => u.isAdmin).length}
+👥 Total Premium Users: ${premiumUsers.length}
+👑 Premium Admins: ${premiumUsers.filter(u => u.isAdmin).length}
 
-📊 **Premium Members:**
+📊 Premium Members:
  ${userList}
 
 💎 Legend: 💎 Premium | 👑 Admin`;
@@ -2237,7 +2237,7 @@ bot.command('registrations', async (ctx) => {
   }
 
   if (registrationRequests.size === 0) {
-    await sendFormattedMessage(ctx, '📋 **No Pending Registrations** 📋\n\n✅ All registration requests have been processed.');
+    await sendFormattedMessage(ctx, '📋 No Pending Registrations 📋\n\n✅ All registration requests have been processed.');
     return;
   }
 
@@ -2245,14 +2245,14 @@ bot.command('registrations', async (ctx) => {
     return `${index + 1}. ⏳ @${req.username || 'N/A'} (${req.telegramId}) - ${req.timestamp.toLocaleDateString()}`;
   }).join('\n');
 
-  const response = `📋 **Pending Registration Requests** 📋
+  const response = `📋 Pending Registration Requests 📋
 
-👥 **Total Pending:** ${registrationRequests.size}
+👥 Total Pending: ${registrationRequests.size}
 
-📊 **Registration List:**
+📊 Registration List:
  ${registrationList}
 
-🎯 **Actions:**
+🎯 Actions:
 • Use /approve <user_id> to approve
 • Use /reject <user_id> to reject
 • Or use the callback buttons in notification messages`;
@@ -2270,7 +2270,7 @@ bot.command('approve', async (ctx) => {
 
   const targetUserId = ctx.match?.toString();
   if (!targetUserId) {
-    await sendFormattedMessage(ctx, '✅ *Usage: /approve <user_id>*\n\nExample: /approve 123456789');
+    await sendFormattedMessage(ctx, '✅ Usage: /approve <user_id>\n\nExample: /approve 123456789');
     return;
   }
 
@@ -2298,37 +2298,37 @@ bot.command('approve', async (ctx) => {
   users.set(targetUserId, user);
   registrationRequests.delete(targetUserId);
 
-  const userMessage = `🎉 **Registration Approved!** 🎉
+  const userMessage = `🎉 Registration Approved! 🎉
 
-✅ *Congratulations! Your registration has been approved.*
+✅ Congratulations! Your registration has been approved.
 
-💎 **Welcome Benefits:**
+💎 Welcome Benefits:
 • 25 starting credits 🪙
 • Full access to all OSINT tools
 • Premium features available
 
-🚀 **Get Started:**
+🚀 Get Started:
 • Use /start to see all available commands
 • Try /help for detailed instructions
 • Check /credits to see your balance
 
-⚡ *Thank you for joining our OSINT community!*`;
+⚡ Thank you for joining our OSINT community!`;
 
   await notifyUser(targetUserId, userMessage);
 
-  const adminMessage = `✅ **Registration Approved Successfully** ✅
+  const adminMessage = `✅ Registration Approved Successfully ✅
 
-👤 **User Details:**
+👤 User Details:
 • User ID: ${targetUserId}
 • Username: @${user.username || 'N/A'}
 • Credits Granted: 25
 
-🎯 **Action Completed:**
+🎯 Action Completed:
 • Status: Approved ✅
 • Processed by: @${ctx.from?.username}
 • Timestamp: ${new Date().toLocaleString()}
 
-💎 *User has been notified about approval*`;
+💎 User has been notified about approval`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2343,7 +2343,7 @@ bot.command('reject', async (ctx) => {
 
   const targetUserId = ctx.match?.toString();
   if (!targetUserId) {
-    await sendFormattedMessage(ctx, '❌ *Usage: /reject <user_id>*\n\nExample: /reject 123456789');
+    await sendFormattedMessage(ctx, '❌ Usage: /reject <user_id>\n\nExample: /reject 123456789');
     return;
   }
 
@@ -2355,31 +2355,31 @@ bot.command('reject', async (ctx) => {
 
   registrationRequests.delete(targetUserId);
 
-  const userMessage = `❌ **Registration Rejected** ❌
+  const userMessage = `❌ Registration Rejected ❌
 
-📋 *Your registration request has been rejected.*
+📋 Your registration request has been rejected.
 
-📞 **Next Steps:**
+📞 Next Steps:
 • Contact the admin for more information
 • Review registration requirements
 • You may submit a new request if needed
 
-💡 *If you believe this is an error, please reach out to our support team*`;
+💡 If you believe this is an error, please reach out to our support team`;
 
   await notifyUser(targetUserId, userMessage);
 
-  const adminMessage = `❌ **Registration Rejected Successfully** ❌
+  const adminMessage = `❌ Registration Rejected Successfully ❌
 
-👤 **User Details:**
+👤 User Details:
 • User ID: ${targetUserId}
 • Username: @${request.username || 'N/A'}
 
-🎯 **Action Completed:**
+🎯 Action Completed:
 • Status: Rejected ❌
 • Processed by: @${ctx.from?.username}
 • Timestamp: ${new Date().toLocaleString()}
 
-💎 *User has been notified about rejection*`;
+💎 User has been notified about rejection`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2394,7 +2394,7 @@ bot.command('approveall', async (ctx) => {
   }
 
   if (registrationRequests.size === 0) {
-    await sendFormattedMessage(ctx, '📋 **No Pending Registrations** 📋\n\n✅ All registration requests have been processed.');
+    await sendFormattedMessage(ctx, '📋 No Pending Registrations 📋\n\n✅ All registration requests have been processed.');
     return;
   }
 
@@ -2432,21 +2432,21 @@ bot.command('approveall', async (ctx) => {
     });
 
     // Notify user
-    const userMessage = `🎉 **Registration Approved!** 🎉
+    const userMessage = `🎉 Registration Approved! 🎉
 
-✅ *Congratulations! Your registration has been approved.*
+✅ Congratulations! Your registration has been approved.
 
-💎 **Welcome Benefits:**
+💎 Welcome Benefits:
 • 25 starting credits 🪙
 • Full access to all OSINT tools
 • Premium features available
 
-🚀 **Get Started:**
+🚀 Get Started:
 • Use /start to see all available commands
 • Try /help for detailed instructions
 • Check /credits to see your balance
 
-⚡ *Thank you for joining our OSINT community!*`;
+⚡ Thank you for joining our OSINT community!`;
 
     await notifyUser(targetUserId, userMessage);
   }
@@ -2456,22 +2456,22 @@ bot.command('approveall', async (ctx) => {
   registrationRequests.clear();
 
   // Send confirmation to admin
-  const adminMessage = `✅ **All Registrations Approved Successfully** ✅
+  const adminMessage = `✅ All Registrations Approved Successfully ✅
 
-📊 **Approval Summary:**
+📊 Approval Summary:
 • Total Approved: ${totalApproved} users
 • Credits per User: 25 🪙
 • Total Credits Distributed: ${totalApproved * 25} 🪙
 
-👥 **Approved Users:**
+👥 Approved Users:
  ${approvedUsers.map((user, index) => `${index + 1}. @${user.username} (${user.userId})`).join('\n')}
 
-🎯 **Action Completed:**
+🎯 Action Completed:
 • Status: All Approved ✅
 • Processed by: @${ctx.from?.username}
 • Timestamp: ${new Date().toLocaleString()}
 
-💎 *All users have been notified about their approval*`;
+💎 All users have been notified about their approval`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2492,24 +2492,24 @@ bot.command('adminstats', async (ctx) => {
   const totalQueries = Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0);
   const pendingRegistrations = registrationRequests.size;
 
-  const statsMessage = `📊 **Admin Statistics Dashboard** 📊
+  const statsMessage = `📊 Admin Statistics Dashboard 📊
 
-👥 **User Statistics:**
+👥 User Statistics:
 • Total Users: ${totalUsers}
 • Approved Users: ${approvedUsers}
 • Premium Users: ${premiumUsers}
 • Admin Users: ${adminUsers}
 • Pending Registrations: ${pendingRegistrations}
 
-📈 **Usage Statistics:**
+📈 Usage Statistics:
 • Total Queries: ${totalQueries}
 • Average Queries/User: ${approvedUsers > 0 ? (totalQueries / approvedUsers).toFixed(1) : 0}
 
-💎 **Premium Metrics:**
+💎 Premium Metrics:
 • Premium Conversion: ${totalUsers > 0 ? ((premiumUsers / totalUsers) * 100).toFixed(1) : 0}%
 • Approval Rate: ${totalUsers > 0 ? ((approvedUsers / totalUsers) * 100).toFixed(1) : 0}%
 
-🔧 **System Health:**
+🔧 System Health:
 • Bot Status: ✅ Online
 • Database: ✅ Connected
 • Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
@@ -2535,17 +2535,17 @@ bot.command('activity', async (ctx) => {
     `• ${index + 1}. @${u.username || 'N/A'} - ${u.totalQueries} queries`
   ).join('\n');
 
-  const activityMessage = `📈 **Recent Activity Log** 📈
+  const activityMessage = `📈 Recent Activity Log 📈
 
-👥 **Most Active Users (Top 10):**
+👥 Most Active Users (Top 10):
  ${activityList || 'No recent activity'}
 
-📊 **Activity Summary:**
+📊 Activity Summary:
 • Total Active Users: ${recentUsers.length}
 • Total Queries: ${recentUsers.reduce((sum, u) => sum + u.totalQueries, 0)}
 • Average Queries: ${recentUsers.length > 0 ? (recentUsers.reduce((sum, u) => sum + u.totalQueries, 0) / recentUsers.length).toFixed(1) : 0}
 
-🔄 *Real-time activity monitoring*`;
+🔄 Real-time activity monitoring`;
 
   await sendFormattedMessage(ctx, activityMessage);
 });
@@ -2565,19 +2565,19 @@ bot.command('revenue', async (ctx) => {
   const estimatedMonthlyRevenue = premiumUsers * monthlyPremiumPrice;
   const estimatedYearlyRevenue = estimatedMonthlyRevenue * 12;
 
-  const revenueMessage = `💰 **Premium Revenue Statistics** 💰
+  const revenueMessage = `💰 Premium Revenue Statistics 💰
 
-👥 **Premium Metrics:**
+👥 Premium Metrics:
 • Premium Users: ${premiumUsers}
 • Total Approved Users: ${totalUsers}
 • Premium Conversion Rate: ${totalUsers > 0 ? ((premiumUsers / totalUsers) * 100).toFixed(1) : 0}%
 
-💵 **Revenue Estimates:**
+💵 Revenue Estimates:
 • Monthly Price: $${monthlyPremiumPrice}
 • Estimated Monthly Revenue: $${estimatedMonthlyRevenue.toFixed(2)}
 • Estimated Yearly Revenue: $${estimatedYearlyRevenue.toFixed(2)}
 
-📈 **Growth Potential:**
+📈 Growth Potential:
 • Target Conversion: 10%
 • Potential Premium Users: ${Math.round(totalUsers * 0.1)}
 • Potential Monthly Revenue: $${(Math.round(totalUsers * 0.1) * monthlyPremiumPrice).toFixed(2)}`;
@@ -2596,11 +2596,11 @@ bot.command('broadcast', async (ctx) => {
 
   const message = ctx.match?.toString();
   if (!message) {
-    await sendFormattedMessage(ctx, '📢 *Usage: /broadcast <message>*\n\nExample: /broadcast "Maintenance scheduled for tonight"');
+    await sendFormattedMessage(ctx, '📢 Usage: /broadcast <message>\n\nExample: /broadcast "Maintenance scheduled for tonight"');
     return;
   }
 
-  await sendFormattedMessage(ctx, '📢 *Preparing broadcast...*');
+  await sendFormattedMessage(ctx, '📢 Preparing broadcast...');
 
   const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
   let successCount = 0;
@@ -2608,7 +2608,7 @@ bot.command('broadcast', async (ctx) => {
 
   for (const user of approvedUsers) {
     try {
-      await notifyUser(user.telegramId, `📢 **Broadcast Message** 📢\n\n${message}`);
+      await notifyUser(user.telegramId, `📢 Broadcast Message 📢\n\n${message}`);
       successCount++;
     } catch (error) {
       console.error(`Failed to send broadcast to ${user.telegramId}:`, error);
@@ -2616,18 +2616,18 @@ bot.command('broadcast', async (ctx) => {
     }
   }
 
-  const resultMessage = `📢 **Broadcast Completed** 📢
+  const resultMessage = `📢 Broadcast Completed 📢
 
-✅ **Delivery Statistics:**
+✅ Delivery Statistics:
 • Total Users: ${approvedUsers.length}
 • Successful: ${successCount}
 • Failed: ${failCount}
 • Success Rate: ${approvedUsers.length > 0 ? ((successCount / approvedUsers.length) * 100).toFixed(1) : 0}%
 
-📝 **Message:**
+📝 Message:
  ${message}
 
-👤 **Sent by:** @${ctx.from?.username || 'Admin'}`;
+👤 Sent by: @${ctx.from?.username || 'Admin'}`;
 
   await sendFormattedMessage(ctx, resultMessage);
 });
@@ -2642,7 +2642,7 @@ bot.command('announce', async (ctx) => {
 
   const input = ctx.match?.toString();
   if (!input || !input.includes('|')) {
-    await sendFormattedMessage(ctx, '🎭 *Usage: /announce <title>|<message>*\n\nExample: /announce "New Feature|We just added domain lookup!"');
+    await sendFormattedMessage(ctx, '🎭 Usage: /announce <title>|<message>\n\nExample: /announce "New Feature|We just added domain lookup!"');
     return;
   }
 
@@ -2654,17 +2654,17 @@ bot.command('announce', async (ctx) => {
     return;
   }
 
-  await sendFormattedMessage(ctx, '🎭 *Preparing rich announcement...*');
+  await sendFormattedMessage(ctx, '🎭 Preparing rich announcement...');
 
   const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
   let successCount = 0;
   let failCount = 0;
 
-  const announcementMessage = `🎭 **${title.trim()}** 🎭
+  const announcementMessage = `🎭 ${title.trim()} 🎭
 
  ${message}
 
-💎 *Premium OSINT Bot Announcement*`;
+💎 Premium OSINT Bot Announcement`;
 
   for (const user of approvedUsers) {
     try {
@@ -2676,19 +2676,19 @@ bot.command('announce', async (ctx) => {
     }
   }
 
-  const resultMessage = `🎭 **Rich Announcement Sent** 🎭
+  const resultMessage = `🎭 Rich Announcement Sent 🎭
 
-✅ **Delivery Statistics:**
+✅ Delivery Statistics:
 • Total Users: ${approvedUsers.length}
 • Successful: ${successCount}
 • Failed: ${failCount}
 • Success Rate: ${approvedUsers.length > 0 ? ((successCount / approvedUsers.length) * 100).toFixed(1) : 0}%
 
-📝 **Announcement Details:**
+📝 Announcement Details:
 • Title: ${title.trim()}
 • Message: ${message}
 
-👤 **Sent by:** @${ctx.from?.username || 'Admin'}`;
+👤 Sent by: @${ctx.from?.username || 'Admin'}`;
 
   await sendFormattedMessage(ctx, resultMessage);
 });
@@ -2704,7 +2704,7 @@ bot.command('maintenance', async (ctx) => {
 
   const args = ctx.match?.toString().split(' ');
   if (!args || args.length < 1) {
-    await sendFormattedMessage(ctx, '⚙️ *Usage: /maintenance <on|off|message>*\n\nExamples:\n• /maintenance on "Bot under maintenance"\n• /maintenance off');
+    await sendFormattedMessage(ctx, '⚙️ Usage: /maintenance <on|off|message>\n\nExamples:\n• /maintenance on "Bot under maintenance"\n• /maintenance off');
     return;
   }
 
@@ -2714,9 +2714,9 @@ bot.command('maintenance', async (ctx) => {
     maintenanceMode = true;
     maintenanceMessage = args.slice(1).join(' ') || "Bot is currently under maintenance. Please try again later.";
     
-    await sendFormattedMessage(ctx, `⚙️ **Maintenance Mode Enabled** ⚙️
+    await sendFormattedMessage(ctx, `⚙️ Maintenance Mode Enabled ⚙️
 
-✅ **Settings Updated:**
+✅ Settings Updated:
 • Status: Maintenance ON
 • Message: "${maintenanceMessage}"
 • Admin: @${ctx.from?.username}
@@ -2738,9 +2738,9 @@ bot.command('maintenance', async (ctx) => {
   else if (action === 'off') {
     maintenanceMode = false;
     
-    await sendFormattedMessage(ctx, `⚙️ **Maintenance Mode Disabled** ⚙️
+    await sendFormattedMessage(ctx, `⚙️ Maintenance Mode Disabled ⚙️
 
-✅ **Settings Updated:**
+✅ Settings Updated:
 • Status: Maintenance OFF
 • Admin: @${ctx.from?.username}
 
@@ -2761,7 +2761,7 @@ bot.command('lucky', async (ctx) => {
 
   const amount = parseInt(ctx.match?.toString() || '100');
   if (isNaN(amount) || amount <= 0) {
-    await sendFormattedMessage(ctx, '🍀 *Usage: /lucky [amount]*\n\nExample: /lucky 500');
+    await sendFormattedMessage(ctx, '🍀 Usage: /lucky [amount]\n\nExample: /lucky 500');
     return;
   }
 
@@ -2777,33 +2777,33 @@ bot.command('lucky', async (ctx) => {
 
   luckyUser.credits += amount;
 
-  const userMessage = `🍀 **Lucky Draw Winner!** 🍀
+  const userMessage = `🍀 Lucky Draw Winner! 🍀
 
-🎉 **Congratulations!**
-💰 **Prize:** ${amount} credits
-💳 **New Balance:** ${luckyUser.credits} credits
-🎯 **Total Participants:** ${approvedUsers.length}
+🎉 Congratulations!
+💰 Prize: ${amount} credits
+💳 New Balance: ${luckyUser.credits} credits
+🎯 Total Participants: ${approvedUsers.length}
 
-✨ *You are today's lucky winner!*
+✨ You are today's lucky winner!
 
-💎 *Enjoy your bonus credits!*`;
+💎 Enjoy your bonus credits!`;
 
   await notifyUser(luckyUser.telegramId, userMessage);
 
-  const adminMessage = `🍀 **Lucky Draw Completed** 🍀
+  const adminMessage = `🍀 Lucky Draw Completed 🍀
 
-🎉 **Winner Details:**
+🎉 Winner Details:
 • Lucky User: @${luckyUser.username || 'N/A'} (${luckyUser.telegramId})
 • Prize Amount: ${amount} credits
 • Total Participants: ${approvedUsers.length}
 • Winner's New Balance: ${luckyUser.credits} credits
 
-🎯 **Draw Statistics:**
+🎯 Draw Statistics:
 • Selection Method: Random
 • Odds of Winning: ${(1 / approvedUsers.length * 100).toFixed(2)}%
 • Admin: @${ctx.from?.username}
 
-✨ *Lucky user has been notified!*`;
+✨ Lucky user has been notified!`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2817,14 +2817,14 @@ bot.command('reset_daily', async (ctx) => {
     return;
   }
 
-  const message = `🔄 **Daily Statistics Reset** 🔄
+  const message = `🔄 Daily Statistics Reset 🔄
 
-✅ **Reset Details:**
+✅ Reset Details:
 • Users Updated: ${users.size}
 • Reset Date: ${new Date().toLocaleDateString()}
 • Admin: @${ctx.from?.username}
 
-📊 *All daily query counts have been reset to zero*`;
+📊 All daily query counts have been reset to zero`;
 
   await sendFormattedMessage(ctx, message);
 });
@@ -2837,18 +2837,18 @@ bot.command('masspremium', async (ctx) => {
     return;
   }
 
-  const message = `👑 **Mass Premium Upgrade** 👑
+  const message = `👑 Mass Premium Upgrade 👑
 
-🎊 **Upgrade Features:**
+🎊 Upgrade Features:
 • Multiple user selection
 • Bulk premium status
 • Discounted pricing
 • Special promotions
 
-👑 *This feature requires additional implementation*
+👑 This feature requires additional implementation
 
-🎯 **Current Premium Users:** ${Array.from(users.values()).filter(u => u.isPremium).length}
-👤 **Requested by:** @${ctx.from?.username}`;
+🎯 Current Premium Users: ${Array.from(users.values()).filter(u => u.isPremium).length}
+👤 Requested by: @${ctx.from?.username}`;
 
   await sendFormattedMessage(ctx, message);
 });
@@ -2864,21 +2864,21 @@ bot.command('resetuser', async (ctx) => {
   const targetUserId = ctx.match?.toString();
   const targetUser = targetUserId ? users.get(targetUserId) : null;
 
-  const message = `🔄 **User Account Reset** 🔄
+  const message = `🔄 User Account Reset 🔄
 
-⚠️ *User reset functionality would be implemented here*
+⚠️ User reset functionality would be implemented here
 
-🔄 **Reset Features:**
+🔄 Reset Features:
 • Clear user statistics
 • Reset credit balance
 • Remove query history
 • Fresh start option
 
-👤 **Target User:** @${targetUser?.username || 'N/A'} (${targetUserId || 'Not specified'})
-🎯 **Current Status:** User data preserved
-👤 **Requested by:** @${ctx.from?.username}
+👤 Target User: @${targetUser?.username || 'N/A'} (${targetUserId || 'Not specified'})
+🎯 Current Status: User data preserved
+👤 Requested by: @${ctx.from?.username}
 
-🔄 *This feature requires additional implementation*`;
+🔄 This feature requires additional implementation`;
 
   await sendFormattedMessage(ctx, message);
 });
@@ -2891,23 +2891,23 @@ bot.command('logs', async (ctx) => {
     return;
   }
 
-  const message = `📜 **System Logs** 📜
+  const message = `📜 System Logs 📜
 
-⚠️ *System logs functionality would be implemented here*
+⚠️ System logs functionality would be implemented here
 
-📋 **Log Categories:**
+📋 Log Categories:
 • Error logs
 • User activity logs
 • System performance logs
 • Security logs
 
-📊 **Current System Status:**
+📊 Current System Status:
 • Bot: ✅ Online
 • Users: ${users.size} registered
 • Queries: ${Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0)} total
 • Admin: @${ctx.from?.username}
 
-📜 *This feature requires additional implementation*`;
+📜 This feature requires additional implementation`;
 
   await sendFormattedMessage(ctx, message);
 });
@@ -2920,23 +2920,23 @@ bot.command('backup', async (ctx) => {
     return;
   }
 
-  const message = `💾 **Database Backup** 💾
+  const message = `💾 Database Backup 💾
 
-⚠️ *Backup functionality would be implemented here*
+⚠️ Backup functionality would be implemented here
 
-📋 **Backup Features:**
+📋 Backup Features:
 • User data export
 • Query history backup
 • Credit transaction logs
 • Settings and configurations
 
-📊 **Current Data:**
+📊 Current Data:
 • Total Users: ${users.size}
 • Total Queries: ${Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0)} total
 • Registration Requests: ${registrationRequests.size}
 • Admin: @${ctx.from?.username}
 
-💾 *This feature requires additional implementation*`;
+💾 This feature requires additional implementation`;
 
   await sendFormattedMessage(ctx, message);
 });
@@ -2950,36 +2950,36 @@ bot.command('checkstatus', async (ctx) => {
   // Check if user exists in users map
   const user = users.get(telegramId);
   if (user) {
-    const statusMessage = `📋 **Your Registration Status** 📋
+    const statusMessage = `📋 Your Registration Status 📋
 
-👤 **Account Information:**
+👤 Account Information:
 • Telegram ID: ${telegramId}
 • Username: @${user.username || 'N/A'}
 • Status: ${user.isApproved ? '✅ Approved' : '❌ Not Approved'}
 • Credits: ${user.credits} 🪙
 • Premium: ${user.isPremium ? '💎 Yes' : '🔹 No'}
 
-📅 **Registration Date:** ${user.registrationDate.toLocaleDateString()}
+📅 Registration Date: ${user.registrationDate.toLocaleDateString()}
 
- ${!user.isApproved ? '\n⏳ *Your account is pending approval. Please wait for admin to review your request.*' : '\n✅ *Your account is approved and ready to use!*'}`;
+ ${!user.isApproved ? '\n⏳ Your account is pending approval. Please wait for the admin to review your request.' : '\n✅ Your account is approved and ready to use!'}`;
 
     await sendFormattedMessage(ctx, statusMessage);
   } else {
     // Check if there's a pending registration request
     const request = registrationRequests.get(telegramId);
     if (request) {
-      await sendFormattedMessage(ctx, '⏳ *Your registration is pending approval.*\n\nPlease wait for the admin to review your request.');
+      await sendFormattedMessage(ctx, '⏳ Your registration is pending approval.\n\nPlease wait for the admin to review your request.');
     } else {
       // Check if user has verified channel membership
       if (verifiedUsers.has(telegramId)) {
-        await sendFormattedMessage(ctx, '✅ *You have verified your channel membership!* You can now proceed with registration using /register.');
+        await sendFormattedMessage(ctx, '✅ You have verified your channel membership! You can now proceed with registration using /register.');
       } else {
         // Create inline keyboard with join and verify buttons
         const keyboard = new InlineKeyboard()
           .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
           .text("✅ Verify Membership", `verify_${telegramId}`);
         
-        await sendFormattedMessage(ctx, '❌ *No registration found.*\n\nPlease join updates channel and verify your membership before registering.', keyboard);
+        await sendFormattedMessage(ctx, '❌ No registration found.\n\nPlease join the updates channel and verify your membership before registering.', keyboard);
       }
     }
   }
@@ -2993,7 +2993,7 @@ bot.command('sync', async (ctx) => {
 
   const user = users.get(telegramId);
   if (user && user.isApproved) {
-    await sendFormattedMessage(ctx, '✅ *Your account is already synced and approved!*');
+    await sendFormattedMessage(ctx, '✅ Your account is already synced and approved!');
     return;
   }
 
@@ -3012,17 +3012,17 @@ bot.command('sync', async (ctx) => {
       registrationDate: new Date()
     };
     users.set(telegramId, adminUser);
-    await sendFormattedMessage(ctx, '✅ *Admin account synced successfully!*');
+    await sendFormattedMessage(ctx, '✅ Admin account synced successfully!');
     return;
   }
 
   // Note: Made admins need to be manually restored by original admin if bot restarts
-  await sendFormattedMessage(ctx, '❌ *No approved registration found.*\n\n📋 **If you were made admin but lost access:**\n• Contact original admin (@fuck_sake)\n• Or use /register to submit new request\n\n💡 *Made admins lose access if bot restarts - this is normal for security.*');
+  await sendFormattedMessage(ctx, '❌ No approved registration found.\n\n📋 If you were made admin but lost access:\n• Contact the original admin (@fuck_sake)\n• Or use /register to submit new request\n\n💡 Made admins lose access if bot restarts - this is normal for security.');
 });
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ **Bot is working!** 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ Bot is working! 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
 });
 
 // Error handling with conflict resolution
