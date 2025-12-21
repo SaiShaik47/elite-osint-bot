@@ -32,6 +32,7 @@ const ADMINS = [process.env.ADMIN_USER_ID];
 const users = new Map();
 const registrationRequests = new Map();
 const verifiedUsers = new Set(); // Track users who have verified channel membership
+const registeredUsers = new Set(); // Track users who have completed registration
 const adminId = process.env.ADMIN_USER_ID;
 
 // Maintenance mode flag (stored in memory, will reset on bot restart)
@@ -743,90 +744,47 @@ Your account is pending approval by our admin team.
   await sendFormattedMessage(ctx, welcomeMessage);
 });
 
-// Registration command
+// Registration command - Updated with auto-approval flow
 bot.command('register', async (ctx) => {
-  const telegramId = ctx.from?.id.toString();
-  const username = ctx.from?.username;
-  const firstName = ctx.from?.first_name;
-  const lastName = ctx.from?.last_name;
+  const userId = ctx.from.id;
 
-  if (!telegramId) return;
-
-  // Check if user has verified channel membership
-  if (!verifiedUsers.has(telegramId)) {
-    // Create inline keyboard with join and verify buttons
-    const keyboard = new InlineKeyboard()
-      .url("📢 Join Updates Channel", CHANNEL_URL)
-      .text("✅ Verify Membership", `verify_${telegramId}`);
-
-    await sendFormattedMessage(ctx, `❌ Channel membership required! You must join our channel and verify your membership before registering.\n\nPlease join the channel and click "Verify Membership" button below.`, keyboard);
-    return;
+  // Must be verified first
+  if (!verifiedUsers.has(userId)) {
+    return ctx.reply('❌ Please verify by joining the channel first.');
   }
 
-  const user = users.get(telegramId);
+  // Already registered
+  if (registeredUsers.has(userId)) {
+    return ctx.reply('✅ You are already registered.');
+  }
+
+  // Auto approve
+  registeredUsers.add(userId);
   
-  if (user && user.isApproved) {
-    await sendFormattedMessage(ctx, '✅ Your account is already approved! You can use all bot features.');
-    return;
-  }
+  // Create or update user record
+  const user = getOrCreateUser(ctx);
+  user.isApproved = true;
+  user.credits = 25; // Give starting credits
 
-  if (registrationRequests.has(telegramId)) {
-    await sendFormattedMessage(ctx, '⏳ Your registration is already pending approval.\n\nPlease wait for the admin to review your request.');
-    return;
-  }
+  ctx.reply(
+    '🎉 Registration successful!\n' +
+    '✅ Your account is automatically approved.'
+  );
 
-  // Create registration request
-  registrationRequests.set(telegramId, {
-    telegramId,
-    username: username || null,
-    firstName: firstName || null,
-    lastName: lastName || null,
-    status: 'pending',
-    timestamp: new Date()
+  // 🔔 Admin notification ONLY (no approval needed)
+  const username =
+    ctx.from.username
+      ? `@${ctx.from.username}`
+      : ctx.from.first_name || userId;
+
+  ADMINS.forEach(adminId => {
+    bot.api.sendMessage(
+      adminId,
+      `🆕 New user registered\n` +
+      `👤 User: ${username}\n` +
+      `🆔 ID: ${userId}`
+    ).catch(() => {});
   });
-
-  // Notify admin with inline keyboard
-  const adminMessage = `📋 New Registration Request 📋
-
-👤 User Information:
-• Telegram ID: ${telegramId}
-• Username: @${username || 'N/A'}
-• Name: ${firstName || ''} ${lastName || ''}
-
-📅 Request Details:
-• Status: ⏳ Pending
-• Date: ${new Date().toLocaleDateString()}
-
-🎯 Actions:
-• Approve or Reject below`;
-
-  const keyboard = new InlineKeyboard()
-    .text("✅ Approve", `approve_${telegramId}`)
-    .text("❌ Reject", `reject_${telegramId}`);
-
-  await notifyAdmin(adminMessage, keyboard);
-
-  const userMessage = `📋 Registration Submitted 📋
-
-✅ Your registration request has been submitted successfully!
-
-👤 Your Details:
-• Telegram ID: ${telegramId}
-• Username: @${username || 'N/A'}
-
-⏳ Next Steps:
-• Your request is now pending admin approval
-• You'll receive a notification once reviewed
-• Approval typically takes 24-48 hours
-
-💎 After Approval:
-• Full access to all OSINT tools
-• Starting credits balance
-• Premium features available
-
-🔔 You'll be notified when your registration is processed`;
-
-  await sendFormattedMessage(ctx, userMessage);
 });
 
 // ===============================
@@ -884,7 +842,7 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
   }
 });
 
-// Callback query handler for registration
+// Callback query handler for registration (kept for backward compatibility)
 bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
@@ -927,6 +885,7 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
     user.credits = 25; // Give starting credits
     users.set(targetUserId, user);
     registrationRequests.delete(targetUserId);
+    registeredUsers.add(targetUserId);
 
     const userMessage = `🎉 Registration Approved! 🎉
 
@@ -1918,6 +1877,8 @@ bot.command('admin', async (ctx) => {
 
 🔥 🎯 Advanced Tools:
 • /masspremium - 👑 Mass premium upgrade
+• /massremovepremium - 🚫 Mass premium removal
+• /removepremium <user_id> - 🚫 Remove premium from user
 • /resetuser <user_id> - 🔄 Reset user account
 • /logs - 📜 View system logs
 • /backup - 💾 Create database backup
@@ -2609,6 +2570,7 @@ bot.command('approve', async (ctx) => {
   user.credits = 25;
   users.set(targetUserId, user);
   registrationRequests.delete(targetUserId);
+  registeredUsers.add(targetUserId);
 
   const userMessage = `🎉 Registration Approved! 🎉
 
@@ -2738,6 +2700,7 @@ bot.command('approveall', async (ctx) => {
     user.isApproved = true;
     user.credits = 25; // Give starting credits
     users.set(targetUserId, user);
+    registeredUsers.add(targetUserId);
     approvedUsers.push({
       userId: targetUserId,
       username: request.username || 'N/A'
