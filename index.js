@@ -90,6 +90,56 @@ async function isUserJoined(userId) {
   return await checkChannelMembership(userId);
 }
 
+// ===============================
+// UNIVERSAL URL EXTRACTOR (fix [object Object])
+// ===============================
+function isHttpUrl(s) {
+  return typeof s === "string" && /^https?:\/\//i.test(s);
+}
+
+// Finds the first http(s) URL anywhere inside a nested object/array/string
+function findFirstUrlDeep(obj) {
+  if (!obj) return null;
+
+  // direct string
+  if (typeof obj === "string") {
+    return isHttpUrl(obj) ? obj : null;
+  }
+
+  // array: scan
+  if (Array.isArray(obj)) {
+    for (const v of obj) {
+      const hit = findFirstUrlDeep(v);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  // object: prefer common keys first, then deep scan
+  if (typeof obj === "object") {
+    const preferredKeys = [
+      // most common
+      "video", "url", "download", "download_url", "link",
+      // quality keys
+      "hd", "sd", "hd_url", "sd_url", "hdLink", "sdLink",
+      // nested common keys
+      "result", "data", "media", "medias", "links", "response"
+    ];
+
+    for (const k of preferredKeys) {
+      const hit = findFirstUrlDeep(obj[k]);
+      if (hit) return hit;
+    }
+
+    for (const k of Object.keys(obj)) {
+      const hit = findFirstUrlDeep(obj[k]);
+      if (hit) return hit;
+    }
+  }
+
+  return null;
+}
+
 // API Functions
 async function getIpInfo(ip) {
   try {
@@ -457,47 +507,57 @@ async function handleTeraBox(ctx, url) {
   }
 }
 
-// Handle single video downloads
+// Handle single video downloads (FIXED for [object Object])
 async function handleSingleVideo(ctx, url, platform) {
   try {
     let result;
-    
+
     // Call the appropriate download function
     if (platform === 'insta') result = await downloadInstagram(url);
     else if (platform === 'fb') result = await downloadFacebook(url);
     else if (platform === 'snap') result = await downloadSnapchat(url);
     else if (platform === 'pin') result = await downloadPinterest(url);
     else return sendFormattedMessage(ctx, '❌ Unsupported platform.');
-    
+
     if (!result.success) {
       return sendFormattedMessage(ctx, `❌ Failed to download ${platform} video.`);
     }
-    
-    // Extract video URL from response
-    let videoUrl =
-      result.data?.result?.video ||
-      result.data?.video ||
-      result.data?.url ||
-      result.data?.download_url ||
-      result.data?.medias?.[0]?.url ||
-      result.data?.medias?.[0]?.download ||
-      result.data?.links?.download ||
-      result.data?.result?.links?.download ||
-      result.data?.response?.videos?.[0]?.url;
-    
-    // Special handling for m3u8 files (Snapchat)
-    if (result.data?.isM3U8 && videoUrl) {
-      await sendFormattedMessage(ctx, `🎬 ${platform.charAt(0).toUpperCase() + platform.slice(1)} Video\n\n⬇️ Direct Download Link:\n${videoUrl}\n\n⚠️ Note: This is a streaming playlist. You may need to use a video downloader that supports m3u8 files.`);
+
+    // ✅ Special handling for m3u8 files (Snapchat)
+    // (your downloadSnapchat sets isM3U8 flag)
+    const m3u8Url = result.data?.isM3U8 ? (result.data?.video || null) : null;
+    if (m3u8Url && typeof m3u8Url === "string") {
+      await sendFormattedMessage(
+        ctx,
+        `🎬 ${platform.charAt(0).toUpperCase() + platform.slice(1)} Video\n\n` +
+        `⬇️ Direct Download Link:\n${m3u8Url}\n\n` +
+        `⚠️ Note: This is a streaming playlist (m3u8).`
+      );
       return true;
     }
-    
-    if (!videoUrl) {
-      console.error(`Could not extract video URL for ${platform}. Full API Response:`, JSON.stringify(result, null, 2));
-      return sendFormattedMessage(ctx, `❌ Failed to get video URL from ${platform} API.`);
+
+    // ✅ FIX: Extract a REAL string URL from ANY JSON response
+    let videoUrl = null;
+
+    // Prefer obvious keys if present (HD first)
+    if (isHttpUrl(result.data?.hd)) videoUrl = result.data.hd;
+    else if (isHttpUrl(result.data?.hd_url)) videoUrl = result.data.hd_url;
+    else if (isHttpUrl(result.data?.video)) videoUrl = result.data.video;
+    else if (isHttpUrl(result.data?.url)) videoUrl = result.data.url;
+
+    // Fallback: deep scan object/array/string
+    if (!videoUrl) videoUrl = findFirstUrlDeep(result.data);
+
+    // Final validation
+    if (!isHttpUrl(videoUrl)) {
+      console.error(`Could not extract video URL for ${platform}. Full API Response:`, JSON.stringify(result.data, null, 2));
+      return sendFormattedMessage(ctx, `❌ Failed to get direct ${platform} video URL from API.`);
     }
-    
+
+    // ✅ Send directly in Telegram if <= 49MB & video/*
     await sendVideoSmart(ctx, videoUrl, `🎬 ${platform.charAt(0).toUpperCase() + platform.slice(1)} Video`);
     return true;
+
   } catch (error) {
     console.error(`Error handling ${platform}:`, error);
     return sendFormattedMessage(ctx, `❌ Error processing ${platform} video.`);
