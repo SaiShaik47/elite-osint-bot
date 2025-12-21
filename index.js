@@ -1,7 +1,5 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 
 // Load environment variables
 require('dotenv').config();
@@ -15,14 +13,8 @@ if (!botToken) {
   process.exit(1);
 }
 
-// Initialize bot with drop_pending_updates to handle conflicts
-const bot = new Bot(botToken, {
-  client: {
-    // Add these options to handle conflicts better
-    apiRoot: 'https://api.telegram.org',
-    buildUrl: (root, token, method) => `${root}/bot${token}/${method}`,
-  }
-});
+// Initialize bot
+const bot = new Bot(botToken);
 
 // ===============================
 // CONFIGURATION (EDIT ONLY THIS)
@@ -1341,7 +1333,7 @@ async function executeTool(ctx, tool, input) {
 📱 User Agent String:
 \`${result.data.user_agent}\`
 
-💡 This is bot's user agent information`;
+💡 This is the bot's user agent information`;
 
           await sendFormattedMessage(ctx, response);
         } else {
@@ -2426,7 +2418,7 @@ bot.command('give', async (ctx) => {
 • New Balance: ${targetUser.credits} credits
 • Admin: @${ctx.from?.username}
 
-🎯 User has been notified about credit grant`;
+🎯 User has been notified about the credit grant`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2484,7 +2476,7 @@ bot.command('remove', async (ctx) => {
 • New Balance: ${targetUser.credits} credits
 • Admin: @${ctx.from?.username}
 
-🎯 User has been notified about credit deduction`;
+🎯 User has been notified about the credit deduction`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2540,7 +2532,7 @@ bot.command('giveall', async (ctx) => {
 • Total Credits Distributed: ${totalAmount}
 • Admin: @${ctx.from?.username}
 
-🎯 All users have been notified about credit grant`;
+🎯 All users have been notified about the credit grant`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2598,7 +2590,7 @@ bot.command('removeall', async (ctx) => {
 • Total Credits Removed: ${totalAmount}
 • Admin: @${ctx.from?.username}
 
-🎯 All affected users have been notified about credit deduction`;
+🎯 All affected users have been notified about the credit deduction`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2660,7 +2652,7 @@ bot.command('setcredits', async (ctx) => {
 • New Balance: ${targetUser.credits} credits
 • Admin: @${ctx.from?.username}
 
-🎯 User has been notified about credit update`;
+🎯 User has been notified about the credit update`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2719,7 +2711,7 @@ bot.command('premium', async (ctx) => {
 • New Status: ${targetUser.isPremium ? '💎 Premium' : '🔹 Standard'}
 • Admin: @${ctx.from?.username}
 
-🎯 User has been notified about status change`;
+🎯 User has been notified about the status change`;
 
   await sendFormattedMessage(ctx, adminMessage);
 });
@@ -2819,7 +2811,7 @@ bot.command('removeadmin', async (ctx) => {
 • Back to regular user
 • Contact main admin if needed
 
-📞 If you have questions about this change, please reach out to main admin`;
+📞 If you have questions about this change, please reach out to the main admin`;
 
   await notifyUser(targetUserId, userMessage);
 
@@ -3008,7 +3000,7 @@ bot.command('registrations', async (ctx) => {
 🎯 Actions:
 • Use /approve <user_id> to approve
 • Use /reject <user_id> to reject
-• Or use callback buttons in notification messages`;
+• Or use the callback buttons in notification messages`;
 
   await sendFormattedMessage(ctx, response);
 });
@@ -3986,10 +3978,7 @@ console.log(`🤖 Bot Username: @OsintShit_Bot`);
 console.log(`👑 Admin ID: ${adminId}`);
 console.log('📡 Starting polling...');
 
-// Add drop_pending_updates to handle conflicts
-bot.start({
-  drop_pending_updates: true
-}).then(() => {
+bot.start().then(() => {
   console.log('✅ Bot is now running and polling for updates!');
   console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
   console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
