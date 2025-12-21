@@ -85,6 +85,11 @@ async function checkChannelMembership(userId) {
   }
 }
 
+// Helper function to check if user is joined (alias for consistency)
+async function isUserJoined(userId) {
+  return await checkChannelMembership(userId);
+}
+
 // API Functions
 async function getIpInfo(ip) {
   try {
@@ -744,14 +749,17 @@ Your account is pending approval by our admin team.
   await sendFormattedMessage(ctx, welcomeMessage);
 });
 
-// Registration command - Updated with auto-approval flow
+// Registration command - Fixed to check Telegram API directly
 bot.command('register', async (ctx) => {
   const userId = ctx.from.id;
 
-  // Must be verified first
-  if (!verifiedUsers.has(userId)) {
-    return ctx.reply('❌ Please verify by joining the channel first.');
+  // 🔍 REAL check (Telegram API)
+  if (!(await isUserJoined(userId))) {
+    return ctx.reply('❌ Please join the channel first.');
   }
+
+  // Mark verified automatically
+  verifiedUsers.add(userId);
 
   // Already registered
   if (registeredUsers.has(userId)) {
@@ -772,17 +780,16 @@ bot.command('register', async (ctx) => {
   );
 
   // 🔔 Admin notification ONLY (no approval needed)
-  const username =
-    ctx.from.username
-      ? `@${ctx.from.username}`
-      : ctx.from.first_name || userId;
+  const name = ctx.from.username
+    ? `@${ctx.from.username}`
+    : ctx.from.first_name || userId;
 
   ADMINS.forEach(adminId => {
     bot.api.sendMessage(
       adminId,
       `🆕 New user registered\n` +
-      `👤 User: ${username}\n` +
-      `🆔 ID: ${userId}`
+      `👤 ${name}\n` +
+      `🆔 ${userId}`
     ).catch(() => {});
   });
 });
