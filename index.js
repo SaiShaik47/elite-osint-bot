@@ -205,41 +205,37 @@ async function getFreeFireStats(uid) {
   }
 }
 
-async function getPakistaniNumberInfo(number) {
+// NEW: Pakistani Government Number Information API
+async function getPakistaniGovtNumberInfo(number) {
   try {
-    const response = await axios.get(
-      "https://www.simownercheck.com/wp-content/plugins/livetrackers-plugin/search.php",
+    const response = await axios.post(
+      'https://govt-pakistan-number-info.vercel.app/search',
+      { query: number.toString() },
       {
-        params: { type: "mobile", search: number },
         headers: {
-          "accept": "*/*",
-          "referer": "https://www.simownercheck.com/",
-          "x-requested-with": "XMLHttpRequest",
-          "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
+          'Content-Type': 'application/json'
         }
       }
     );
     
-    const data = response.data;
-    const regex = /<td[^>]*>(.*?)<\/td>/g;
-    const matches = data.match(regex);
-    
-    if (matches && matches.length >= 4) {
-      const cleanData = matches.map(match => match.replace(/<[^>]*>/g, '').trim());
-      return {
-        success: true,
-        data: {
-          number: cleanData[0],
-          name: cleanData[1],
-          cnic: cleanData[2],
-          address: cleanData[3]
-        }
+    if (response.data && response.data.success) {
+      return { 
+        success: true, 
+        data: response.data.results,
+        count: response.data.count || 0
+      };
+    } else {
+      return { 
+        success: false, 
+        error: response.data.error || 'No records found' 
       };
     }
-    
-    return { success: false, error: 'No details found for this number' };
   } catch (error) {
-    return { success: false, error: 'Failed to fetch Pakistani number information' };
+    console.error('Error calling Pakistani government number API:', error);
+    return { 
+      success: false, 
+      error: 'Failed to fetch Pakistani government number information' 
+    };
   }
 }
 
@@ -784,7 +780,7 @@ Your account is pending approval by our admin team.
 • /email <email> - Email validation
 • /num <number> - Phone number lookup
 • /basicnum <number> - Basic number information
-• /paknum <number> - Pakistani number lookup
+• /paknum <number> - Pakistani government number lookup
 • /ig <username> - Instagram intelligence
 • /bin <number> - BIN lookup
 • /vehicle <number> - Vehicle details
@@ -1416,6 +1412,7 @@ bot.command('basicnum', async (ctx) => {
   }
 });
 
+// UPDATED: Pakistani Government Number Information command
 bot.command('paknum', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
@@ -1431,23 +1428,35 @@ bot.command('paknum', async (ctx) => {
 
   const number = ctx.match;
   if (!number) {
-    await sendFormattedMessage(ctx, '📱 Usage: /paknum <Pakistani number>\n\nExample: /paknum 03005854962');
+    await sendFormattedMessage(ctx, '📱 Usage: /paknum <Pakistani number or CNIC>\n\nExample: /paknum 03005854962\nExample: /paknum 2150952917167');
     return;
   }
 
-  await sendFormattedMessage(ctx, '🔍 Looking up Pakistani number...');
+  await sendFormattedMessage(ctx, '🔍 Looking up Pakistani government number information...');
 
   try {
-    const result = await getPakistaniNumberInfo(number.toString());
+    const result = await getPakistaniGovtNumberInfo(number.toString());
     
-    if (result.success && result.data) {
-      const response = `📱 Pakistani Number Lookup Results 📱
+    if (result.success && result.data && result.data.length > 0) {
+      // Format the results as JSON with colored formatting
+      const formattedResults = result.data.map((record, index) => ({
+        [`Record #${index + 1}`]: {
+          name: record.name || 'N/A',
+          number: record.n || 'N/A',
+          cnic: record.cnic || 'N/A',
+          address: record.address || 'N/A'
+        }
+      }));
+      
+      const response = `📱 Pakistani Government Number Information 📱
+
+🔍 Found ${result.count} record(s) for: ${number}
 
 \`\`\`json
- ${JSON.stringify(result.data, null, 2)}
+ ${JSON.stringify(formattedResults, null, 2)}
 \`\`\`
 
-💡 Pakistani number information for educational purposes only
+💡 Information for educational purposes only
 • 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
@@ -1455,13 +1464,13 @@ bot.command('paknum', async (ctx) => {
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await sendFormattedMessage(ctx, '❌ Failed to lookup Pakistani number. Please check the number and try again.\n💳 1 credit refunded');
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'No records found for the provided number or CNIC'}\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in paknum command:', error);
     // Refund credit on error
     user.credits += 1;
-    await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani number.\n💳 1 credit refunded');
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani government number information.\n💳 1 credit refunded');
   }
 });
 
@@ -1847,7 +1856,7 @@ bot.command('help', async (ctx) => {
 • /email <email> - Email validation and analysis
 • /num <number> - International phone lookup
 • /basicnum <number> - Basic number information
-• /paknum <number> - Pakistani number details
+• /paknum <number> - Pakistani government number and CNIC lookup
 • /ig <username> - Instagram profile intelligence
 
 🚗 Vehicle & Gaming:
@@ -3627,7 +3636,7 @@ bot.command('test', async (ctx) => {
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ Bot is working! 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ Bot is working! 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /paknum 03005854962\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
 });
 
 // Error handling with conflict resolution
@@ -3672,6 +3681,7 @@ bot.start().then(() => {
   console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
   console.log('🔧 Real maintenance mode functionality is now active!');
   console.log('📢 Channel membership verification is now active!');
+  console.log('🇵🇰 Updated Pakistani government number lookup with new API endpoint!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
