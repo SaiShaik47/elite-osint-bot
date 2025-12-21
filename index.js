@@ -1,6 +1,5 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const axios = require('axios');
-const Database = require('better-sqlite3');
 
 // Load environment variables
 require('dotenv').config();
@@ -17,20 +16,10 @@ if (!botToken) {
 // Initialize bot
 const bot = new Bot(botToken);
 
-// Initialize database
-const db = new Database('bot.db');
-
-// Create tables if they don't exist
-db.prepare(`
-  CREATE TABLE IF NOT EXISTS verified_users (
-    user_id TEXT PRIMARY KEY,
-    verified_at INTEGER
-  )
-`).run();
-
 // In-memory storage
 const users = new Map();
 const registrationRequests = new Map();
+const verifiedUsers = new Set(); // Track users who have verified channel membership
 const adminId = process.env.ADMIN_USER_ID;
 
 // Channel to join for verification
@@ -64,17 +53,19 @@ users.set(adminId, {
 });
 
 // Function to check if user is a member of verification channel
-async function isUserJoined(userId) {
+async function checkChannelMembership(userId) {
   try {
-    const member = await bot.api.getChatMember(verificationChannel, userId);
+    // Try multiple methods to check channel membership
+    const chatMember = await bot.api.getChatMember(verificationChannel, userId);
     
     // Log the result for debugging
-    console.log(`Channel membership check for user ${userId}:`, member.status);
+    console.log(`Channel membership check for user ${userId}:`, chatMember.status);
     
-    // Only allow actual members, admins, and creators
-    return ['member', 'administrator', 'creator'].includes(member.status);
+    // Check for all possible member statuses
+    return ['member', 'administrator', 'creator', 'restricted', 'left'].includes(chatMember.status);
   } catch (error) {
     console.error('Error checking channel membership:', error);
+    // If we can't check, assume they're not a member
     return false;
   }
 }
@@ -590,6 +581,55 @@ async function notifyAdmin(message, keyboard) {
   }
 }
 
+// Global middleware to check channel membership
+bot.use(async (ctx, next) => {
+  // Skip channel membership check for admin users
+  if (isAdmin(ctx.from?.id.toString())) {
+    return next();
+  }
+  
+  // Allow /start command without verification
+  if (ctx.message?.text === '/start') {
+    return next();
+  }
+  
+  // If user is not verified, block access
+  if (!verifiedUsers.has(ctx.from?.id.toString())) {
+    return ctx.reply(
+      '🔒 Join our channel to use this bot.',
+      {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '📢 Join Channel', url: 'https://t.me/OsintShitUpdates' },
+            { text: '✅ Verify', callback_data: `verify_${ctx.from.id}` }
+          ]]
+        }
+      }
+    );
+  }
+  
+  // Check if user is still in the channel
+  const stillJoined = await checkChannelMembership(ctx.from.id.toString());
+  if (!stillJoined) {
+    verifiedUsers.delete(ctx.from.id.toString());
+    
+    return ctx.reply(
+      '❌ You left the channel.\n\nJoin again to continue.',
+      {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '📢 Join Channel', url: 'https://t.me/OsintShitUpdates' },
+            { text: '✅ Verify Again', callback_data: `verify_${ctx.from.id}` }
+          ]]
+        }
+      }
+    );
+  }
+  
+  // If user is verified and still in channel, continue
+  return next();
+});
+
 // Middleware to check maintenance mode
 bot.use((ctx, next) => {
   // Skip maintenance check for admin users
@@ -603,60 +643,6 @@ bot.use((ctx, next) => {
   }
   
   // Otherwise, continue to next middleware
-  return next();
-});
-
-// Global middleware for channel verification
-bot.use(async (ctx, next) => {
-  // Skip if no from user
-  if (!ctx.from) return next();
-  
-  const userId = ctx.from.id.toString();
-  
-  // Allow /start command always
-  if (ctx.message?.text === '/start') {
-    return next();
-  }
-  
-  // Check if user is verified in database
-  const row = db.prepare('SELECT user_id FROM verified_users WHERE user_id = ?').get(userId);
-  const isVerified = !!row;
-  
-  // Check if user is actually in channel
-  const isInChannel = await isUserJoined(userId);
-  
-  // If user is verified but not in channel, remove from database
-  if (isVerified && !isInChannel) {
-    db.prepare('DELETE FROM verified_users WHERE user_id = ?').run(userId);
-    
-    return ctx.reply(
-      '❌ You left the channel.\n\n📢 Join again to continue using the bot.',
-      {
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '📢 Join Channel', url: 'https://t.me/OsintShitUpdates' },
-            { text: '✅ Verify Again', callback_data: `verify_${userId}` }
-          ]]
-        }
-      }
-    );
-  }
-  
-  // If user is not verified and not in channel, lock bot
-  if (!isVerified && !isInChannel) {
-    return ctx.reply(
-      '🔒 You must join our channel to use this bot.\n\n📢 Join below and then verify:',
-      {
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '📢 Join Channel', url: 'https://t.me/OsintShitUpdates' },
-            { text: '✅ Verify', callback_data: `verify_${userId}` }
-          ]]
-        }
-      }
-    );
-  }
-  
   return next();
 });
 
@@ -749,25 +735,15 @@ bot.command('register', async (ctx) => {
 
   if (!telegramId) return;
 
-  // Double-check if user is verified in database
-  const row = db.prepare('SELECT user_id FROM verified_users WHERE user_id = ?').get(telegramId);
-  const isVerified = !!row;
-  
-  // Check if user is actually in channel
-  const isInChannel = await isUserJoined(telegramId);
-  
-  if (!isVerified || !isInChannel) {
-    return ctx.reply(
-      '❌ You must join the channel and verify your membership before registering.\n\n📢 Join below and then verify:',
-      {
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '📢 Join Channel', url: 'https://t.me/OsintShitUpdates' },
-            { text: '✅ Verify', callback_data: `verify_${telegramId}` }
-          ]]
-        }
-      }
-    );
+  // Check if user has verified channel membership
+  if (!verifiedUsers.has(telegramId)) {
+    // Create inline keyboard with join and verify buttons
+    const keyboard = new InlineKeyboard()
+      .url("📢 Join Updates Channel", `https://t.me/OsintShitUpdates`)
+      .text("✅ Verify Membership", `verify_${telegramId}`);
+
+    await sendFormattedMessage(ctx, `❌ Channel membership required! You must join ${verificationChannel} and verify your membership before registering.\n\nPlease join the channel and click "Verify Membership" button below.`, keyboard);
+    return;
   }
 
   const user = users.get(telegramId);
@@ -848,22 +824,16 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
   }
 
   // Check if user is already verified
-  const row = db.prepare('SELECT user_id FROM verified_users WHERE user_id = ?').get(targetUserId);
-  const alreadyVerified = !!row;
-  
-  if (alreadyVerified) {
+  if (verifiedUsers.has(targetUserId)) {
     await ctx.answerCallbackQuery('✅ You have already verified your channel membership!');
     return;
   }
 
   // Check if user is a member of the verification channel
-  const isMember = await isUserJoined(targetUserId);
+  const isMember = await checkChannelMembership(targetUserId);
   
   if (isMember) {
-    // Save to database
-    db.prepare('INSERT OR REPLACE INTO verified_users (user_id, verified_at) VALUES (?, ?)')
-      .run(targetUserId, Date.now());
-    
+    verifiedUsers.add(targetUserId);
     await ctx.answerCallbackQuery('✅ Verification successful! You can now register.');
     await ctx.editMessageText(`✅ Verification Successful ✅
 
@@ -3056,11 +3026,8 @@ bot.command('checkstatus', async (ctx) => {
     if (request) {
       await sendFormattedMessage(ctx, '⏳ Your registration is pending approval.\n\nPlease wait for the admin to review your request.');
     } else {
-      // Check if user is verified in database
-      const row = db.prepare('SELECT user_id FROM verified_users WHERE user_id = ?').get(telegramId);
-      const isVerified = !!row;
-      
-      if (isVerified) {
+      // Check if user has verified channel membership
+      if (verifiedUsers.has(telegramId)) {
         await sendFormattedMessage(ctx, '✅ You have verified your channel membership! You can now proceed with registration using /register.');
       } else {
         // Create inline keyboard with join and verify buttons
@@ -3153,7 +3120,7 @@ bot.start().then(() => {
   console.log('🎯 All OSINT commands, admin panel, and registration management are ready!');
   console.log('🎬 Enhanced video downloader with size detection and platform auto-detection is now active!');
   console.log('🔧 Real maintenance mode functionality is now active!');
-  console.log('📢 Channel membership verification with database storage is now active!');
+  console.log('📢 Channel membership verification is now active!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
