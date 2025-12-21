@@ -1,6 +1,5 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const axios = require('axios');
-const Redis = require("ioredis");
 
 // Load environment variables
 require('dotenv').config();
@@ -18,48 +17,27 @@ if (!botToken) {
 const bot = new Bot(botToken);
 
 // ===============================
-// REDIS CONNECTION
-// ===============================
-const REDIS_URL = process.env.REDIS_URL || 
-  `redis://${process.env.REDISUSER || "default"}:${encodeURIComponent(
-    process.env.REDISPASSWORD || process.env.REDIS_PASSWORD || ""
-  )}@${process.env.REDISHOST}:${process.env.REDISPORT}`;
-
-if (!REDIS_URL) {
-  console.error('❌ REDIS_URL environment variable is not set!');
-  process.exit(1);
-}
-
-const redis = new Redis(REDIS_URL, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: true,
-});
-
-redis.on("connect", () => console.log("✅ Redis: connected"));
-redis.on("ready", () => console.log("✅ Redis: ready"));
-redis.on("error", (err) => console.error("❌ Redis error:", err.message));
-
-// Test Redis connection
-(async () => {
-  try {
-    await redis.set("test", "Redis is working!", "EX", 60);
-    const val = await redis.get("test");
-    console.log("🧪 Redis test value:", val);
-    await redis.del("test");
-  } catch (e) {
-    console.error("❌ Redis test failed:", e.message);
-  }
-})();
-
-// ===============================
 // CONFIGURATION (EDIT ONLY THIS)
 // ===============================
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHANNEL_ID = -1003133803574; // Osint Updates (CONFIRMED)
 const CHANNEL_URL = 'https://t.me/OsintShitUpdates';
 
 // Admin Telegram IDs
 const ADMINS = [process.env.ADMIN_USER_ID];
+
+// ===============================
+// MEMORY STORAGE (NO DB)
+// ===============================
+const users = new Map();
+const registrationRequests = new Map();
+const verifiedUsers = new Set(); // Track users who have verified channel membership
+const registeredUsers = new Set(); // Track users who have completed registration
 const adminId = process.env.ADMIN_USER_ID;
+
+// Maintenance mode flag (stored in memory, will reset on bot restart)
+let maintenanceMode = false;
+let maintenanceMessage = "Bot is currently under maintenance. Please try again later.";
 
 // Validate admin ID
 if (!adminId) {
@@ -71,251 +49,18 @@ console.log('✅ Environment variables loaded successfully');
 console.log(`🤖 Bot Token: ${botToken.substring(0, 10)}...`);
 console.log(`👑 Admin ID: ${adminId}`);
 
-// ===============================
-// REDIS STORAGE FUNCTIONS
-// ===============================
-
-// User management
-async function getUser(userId) {
-  try {
-    const userData = await redis.get(`user:${userId}`);
-    return userData ? JSON.parse(userData) : null;
-  } catch (error) {
-    console.error('Error getting user:', error);
-    return null;
-  }
-}
-
-async function setUser(userId, userData) {
-  try {
-    await redis.set(`user:${userId}`, JSON.stringify(userData));
-    return true;
-  } catch (error) {
-    console.error('Error setting user:', error);
-    return false;
-  }
-}
-
-async function getAllUsers() {
-  try {
-    const cursor = '0';
-    const keys = await redis.scan(cursor, 'MATCH', 'user:*', 'COUNT', 1000);
-    const users = [];
-    
-    for (const key of keys[1]) {
-      const userData = await redis.get(key);
-      if (userData) {
-        users.push(JSON.parse(userData));
-      }
-    }
-    
-    return users;
-  } catch (error) {
-    console.error('Error getting all users:', error);
-    return [];
-  }
-}
-
-// Registration requests
-async function getRegistrationRequest(userId) {
-  try {
-    const requestData = await redis.get(`registration:${userId}`);
-    return requestData ? JSON.parse(requestData) : null;
-  } catch (error) {
-    console.error('Error getting registration request:', error);
-    return null;
-  }
-}
-
-async function setRegistrationRequest(userId, requestData) {
-  try {
-    await redis.set(`registration:${userId}`, JSON.stringify(requestData));
-    return true;
-  } catch (error) {
-    console.error('Error setting registration request:', error);
-    return false;
-  }
-}
-
-async function deleteRegistrationRequest(userId) {
-  try {
-    await redis.del(`registration:${userId}`);
-    return true;
-  } catch (error) {
-    console.error('Error deleting registration request:', error);
-    return false;
-  }
-}
-
-async function getAllRegistrationRequests() {
-  try {
-    const cursor = '0';
-    const keys = await redis.scan(cursor, 'MATCH', 'registration:*', 'COUNT', 1000);
-    const requests = [];
-    
-    for (const key of keys[1]) {
-      const requestData = await redis.get(key);
-      if (requestData) {
-        requests.push(JSON.parse(requestData));
-      }
-    }
-    
-    return requests;
-  } catch (error) {
-    console.error('Error getting all registration requests:', error);
-    return [];
-  }
-}
-
-// Verified users
-async function isUserVerified(userId) {
-  try {
-    const result = await redis.sismember('verified_users', userId);
-    return result === 1;
-  } catch (error) {
-    console.error('Error checking verification status:', error);
-    return false;
-  }
-}
-
-async function setUserVerified(userId) {
-  try {
-    await redis.sadd('verified_users', userId);
-    return true;
-  } catch (error) {
-    console.error('Error setting user verification:', error);
-    return false;
-  }
-}
-
-async function removeUserVerification(userId) {
-  try {
-    await redis.srem('verified_users', userId);
-    return true;
-  } catch (error) {
-    console.error('Error removing user verification:', error);
-    return false;
-  }
-}
-
-async function getAllVerifiedUsers() {
-  try {
-    return await redis.smembers('verified_users');
-  } catch (error) {
-    console.error('Error getting all verified users:', error);
-    return [];
-  }
-}
-
-// Registered users
-async function isUserRegistered(userId) {
-  try {
-    const result = await redis.sismember('registered_users', userId);
-    return result === 1;
-  } catch (error) {
-    console.error('Error checking registration status:', error);
-    return false;
-  }
-}
-
-async function setUserRegistered(userId) {
-  try {
-    await redis.sadd('registered_users', userId);
-    return true;
-  } catch (error) {
-    console.error('Error setting user registration:', error);
-    return false;
-  }
-}
-
-async function getAllRegisteredUsers() {
-  try {
-    return await redis.smembers('registered_users');
-  } catch (error) {
-    console.error('Error getting all registered users:', error);
-    return [];
-  }
-}
-
-// Maintenance mode
-async function getMaintenanceMode() {
-  try {
-    const isMaintenance = await redis.get('maintenance_mode');
-    return isMaintenance === 'true';
-  } catch (error) {
-    console.error('Error getting maintenance mode:', error);
-    return false;
-  }
-}
-
-async function setMaintenanceMode(enabled) {
-  try {
-    await redis.set('maintenance_mode', enabled ? 'true' : 'false');
-    return true;
-  } catch (error) {
-    console.error('Error setting maintenance mode:', error);
-    return false;
-  }
-}
-
-async function getMaintenanceMessage() {
-  try {
-    const message = await redis.get('maintenance_message');
-    return message || "Bot is currently under maintenance. Please try again later.";
-  } catch (error) {
-    console.error('Error getting maintenance message:', error);
-    return "Bot is currently under maintenance. Please try again later.";
-  }
-}
-
-async function setMaintenanceMessage(message) {
-  try {
-    await redis.set('maintenance_message', message);
-    return true;
-  } catch (error) {
-    console.error('Error setting maintenance message:', error);
-    return false;
-  }
-}
-
-// Initialize Redis data
-async function initializeRedisData() {
-  try {
-    // Initialize admin user if not exists
-    const adminUser = await getUser(adminId);
-    if (!adminUser) {
-      await setUser(adminId, {
-        telegramId: adminId,
-        username: 'fuck_sake',
-        firstName: 'Admin',
-        isAdmin: true,
-        isApproved: true,
-        credits: 999999,
-        isPremium: true,
-        totalQueries: 0,
-        registrationDate: new Date()
-      });
-    }
-    
-    // Initialize maintenance mode if not set
-    const maintenanceModeSet = await redis.exists('maintenance_mode');
-    if (!maintenanceModeSet) {
-      await setMaintenanceMode(false);
-    }
-    
-    const maintenanceMessageSet = await redis.exists('maintenance_message');
-    if (!maintenanceMessageSet) {
-      await setMaintenanceMessage("Bot is currently under maintenance. Please try again later.");
-    }
-    
-    console.log('✅ Redis data initialized successfully');
-  } catch (error) {
-    console.error('❌ Error initializing Redis data:', error);
-  }
-}
-
-// Call initialization function
-initializeRedisData();
+// Initialize admin user
+users.set(adminId, {
+  telegramId: adminId,
+  username: 'fuck_sake',
+  firstName: 'Admin',
+  isAdmin: true,
+  isApproved: true,
+  credits: 999999,
+  isPremium: true,
+  totalQueries: 0,
+  registrationDate: new Date()
+});
 
 // ===============================
 // BULLETPROOF JOIN CHECK
@@ -843,8 +588,22 @@ function getUserAgentInfo() {
   };
 }
 
+// Helper function to deduct credits
+function deductCredits(user, amount = 1) {
+  if (user.isPremium) {
+    return true; // Premium users don't lose credits
+  }
+  
+  if (user.credits >= amount) {
+    user.credits -= amount;
+    return true;
+  }
+  
+  return false;
+}
+
 // Helper function to get or create user
-async function getOrCreateUser(ctx) {
+function getOrCreateUser(ctx) {
   const telegramId = ctx.from?.id.toString();
   const username = ctx.from?.username;
   const firstName = ctx.from?.first_name;
@@ -852,12 +611,9 @@ async function getOrCreateUser(ctx) {
 
   if (!telegramId) return null;
 
-  // Check if user exists in Redis
-  let user = await getUser(telegramId);
-  
-  // If not, create new user
-  if (!user) {
-    user = {
+  // Check if user exists, if not create new user
+  if (!users.has(telegramId)) {
+    users.set(telegramId, {
       telegramId,
       username: username || null,
       firstName: firstName || null,
@@ -868,17 +624,15 @@ async function getOrCreateUser(ctx) {
       isAdmin: false,
       totalQueries: 0,
       registrationDate: new Date()
-    };
-    
-    await setUser(telegramId, user);
+    });
   }
 
-  return user;
+  return users.get(telegramId);
 }
 
 // Helper function to check if user is admin
-async function isAdmin(userId) {
-  const user = await getUser(userId);
+function isAdmin(userId) {
+  const user = users.get(userId);
   return user && (user.isAdmin || userId === adminId);
 }
 
@@ -896,7 +650,7 @@ async function sendFormattedMessage(ctx, text) {
   }
 }
 
-// Helper function for user notifications
+// Helper function for admin notifications
 async function notifyUser(userId, message) {
   try {
     await bot.api.sendMessage(userId, message, { parse_mode: 'Markdown' });
@@ -917,27 +671,12 @@ async function notifyAdmin(message, keyboard) {
   }
 }
 
-// Helper function to deduct credits
-async function deductCredits(user, amount = 1) {
-  if (user.isPremium) {
-    return true; // Premium users don't lose credits
-  }
-  
-  if (user.credits >= amount) {
-    user.credits -= amount;
-    await setUser(user.telegramId, user);
-    return true;
-  }
-  
-  return false;
-}
-
 // ===============================
 // GLOBAL BOT LOCK MIDDLEWARE
 // ===============================
 bot.use(async (ctx, next) => {
   // Skip channel membership check for admin users
-  if (await isAdmin(ctx.from?.id.toString())) {
+  if (isAdmin(ctx.from?.id.toString())) {
     return next();
   }
   
@@ -952,7 +691,7 @@ bot.use(async (ctx, next) => {
   }
   
   // If user is not verified, block access
-  if (!(await isUserVerified(ctx.from?.id.toString()))) {
+  if (!verifiedUsers.has(ctx.from?.id.toString())) {
     return ctx.reply(
       '🔒 You must join our channel to use this bot.',
       {
@@ -966,7 +705,7 @@ bot.use(async (ctx, next) => {
   // Check if user is still in the channel
   const stillJoined = await checkChannelMembership(ctx.from.id.toString());
   if (!stillJoined) {
-    await removeUserVerification(ctx.from.id.toString());
+    verifiedUsers.delete(ctx.from.id.toString());
     
     return ctx.reply(
       '❌ You left the channel.\n\nJoin again to continue.',
@@ -983,15 +722,15 @@ bot.use(async (ctx, next) => {
 });
 
 // Middleware to check maintenance mode
-bot.use(async (ctx, next) => {
+bot.use((ctx, next) => {
   // Skip maintenance check for admin users
-  if (await isAdmin(ctx.from?.id.toString())) {
+  if (isAdmin(ctx.from?.id.toString())) {
     return next();
   }
   
   // If in maintenance mode, send maintenance message
-  if (await getMaintenanceMode()) {
-    return ctx.reply(await getMaintenanceMessage());
+  if (maintenanceMode) {
+    return ctx.reply(maintenanceMessage);
   }
   
   // Otherwise, continue to next middleware
@@ -1002,7 +741,7 @@ bot.use(async (ctx, next) => {
 // START COMMAND
 // ===============================
 bot.command('start', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   
   if (!user.isApproved) {
     const welcomeMessage = `🚀 Welcome to Premium OSINT Bot 🚀
@@ -1090,21 +829,20 @@ bot.command('register', async (ctx) => {
   }
 
   // Mark verified automatically
-  await setUserVerified(userId);
+  verifiedUsers.add(userId);
 
   // Already registered
-  if (await isUserRegistered(userId)) {
+  if (registeredUsers.has(userId)) {
     return ctx.reply('✅ You are already registered.');
   }
 
   // Auto approve
-  await setUserRegistered(userId);
+  registeredUsers.add(userId);
   
   // Create or update user record
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   user.isApproved = true;
   user.credits = 25; // Give starting credits
-  await setUser(user.telegramId, user);
 
   ctx.reply(
     '🎉 Registration successful!\n' +
@@ -1140,7 +878,7 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
   }
 
   // Check if user is already verified
-  if (await isUserVerified(targetUserId)) {
+  if (verifiedUsers.has(targetUserId)) {
     await ctx.answerCallbackQuery('✅ You have already verified your channel membership!');
     return;
   }
@@ -1154,7 +892,7 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
   const isMember = await checkChannelMembership(targetUserId);
   
   if (isMember) {
-    await setUserVerified(targetUserId);
+    verifiedUsers.add(targetUserId);
     await ctx.editMessageText(`✅ Verification Successful ✅
 
 🎉 You have successfully verified your membership in our channel!
@@ -1185,7 +923,7 @@ bot.callbackQuery(/^verify_(\d+)$/, async (ctx) => {
 bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await ctx.answerCallbackQuery('❌ Only admins can process registrations.');
     return;
   }
@@ -1196,14 +934,14 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
   const action = match[1];
   const targetUserId = match[2];
 
-  const request = await getRegistrationRequest(targetUserId);
+  const request = registrationRequests.get(targetUserId);
   if (!request) {
     await ctx.answerCallbackQuery('❌ Registration request not found.');
     return;
   }
 
   // Check if user already exists
-  let user = await getUser(targetUserId);
+  let user = users.get(targetUserId);
   if (!user) {
     user = {
       telegramId: targetUserId,
@@ -1222,9 +960,9 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
   if (action === 'approve') {
     user.isApproved = true;
     user.credits = 25; // Give starting credits
-    await setUser(targetUserId, user);
-    await deleteRegistrationRequest(targetUserId);
-    await setUserRegistered(targetUserId);
+    users.set(targetUserId, user);
+    registrationRequests.delete(targetUserId);
+    registeredUsers.add(targetUserId);
 
     const userMessage = `🎉 Registration Approved! 🎉
 
@@ -1255,7 +993,7 @@ bot.callbackQuery(/^(approve|reject)_(\d+)$/, async (ctx) => {
 Processed by: @${ctx.from?.username || 'Admin'}`);
 
   } else if (action === 'reject') {
-    await deleteRegistrationRequest(targetUserId);
+    registrationRequests.delete(targetUserId);
 
     const userMessage = `❌ Registration Rejected ❌
 
@@ -1284,12 +1022,12 @@ Processed by: @${ctx.from?.username || 'Admin'}`);
 
 // Universal video downloader command
 bot.command('dl', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     return sendFormattedMessage(ctx, '❌ Insufficient credits!');
   }
 
@@ -1316,27 +1054,24 @@ bot.command('dl', async (ctx) => {
     
     if (success) {
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       user.credits += 1; // Refund credit on failure
-      await setUser(user.telegramId, user);
     }
   } catch (error) {
     console.error('Error in dl command:', error);
     user.credits += 1; // Refund credit on error
-    await setUser(user.telegramId, user);
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
 
 // Keep individual commands for backward compatibility
 bot.command('snap', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     return sendFormattedMessage(ctx, '❌ Insufficient credits!');
   }
 
@@ -1351,26 +1086,23 @@ bot.command('snap', async (ctx) => {
     const success = await handleSingleVideo(ctx, videoUrl, 'snap');
     if (success) {
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       user.credits += 1; // Refund credit on failure
-      await setUser(user.telegramId, user);
     }
   } catch (error) {
     console.error('Error in snap command:', error);
     user.credits += 1; // Refund credit on error
-    await setUser(user.telegramId, user);
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
 
 bot.command('insta', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     return sendFormattedMessage(ctx, '❌ Insufficient credits!');
   }
 
@@ -1385,26 +1117,23 @@ bot.command('insta', async (ctx) => {
     const success = await handleSingleVideo(ctx, videoUrl, 'insta');
     if (success) {
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       user.credits += 1; // Refund credit on failure
-      await setUser(user.telegramId, user);
     }
   } catch (error) {
     console.error('Error in insta command:', error);
     user.credits += 1; // Refund credit on error
-    await setUser(user.telegramId, user);
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
 
 bot.command('pin', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     return sendFormattedMessage(ctx, '❌ Insufficient credits!');
   }
 
@@ -1419,26 +1148,23 @@ bot.command('pin', async (ctx) => {
     const success = await handleSingleVideo(ctx, videoUrl, 'pin');
     if (success) {
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       user.credits += 1; // Refund credit on failure
-      await setUser(user.telegramId, user);
     }
   } catch (error) {
     console.error('Error in pin command:', error);
     user.credits += 1; // Refund credit on error
-    await setUser(user.telegramId, user);
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
 
 bot.command('fb', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     return sendFormattedMessage(ctx, '❌ Insufficient credits!');
   }
 
@@ -1453,26 +1179,23 @@ bot.command('fb', async (ctx) => {
     const success = await handleSingleVideo(ctx, videoUrl, 'fb');
     if (success) {
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       user.credits += 1; // Refund credit on failure
-      await setUser(user.telegramId, user);
     }
   } catch (error) {
     console.error('Error in fb command:', error);
     user.credits += 1; // Refund credit on error
-    await setUser(user.telegramId, user);
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
 
 bot.command('terabox', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
   }
 
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     return sendFormattedMessage(ctx, '❌ Insufficient credits!');
   }
 
@@ -1487,29 +1210,26 @@ bot.command('terabox', async (ctx) => {
     const success = await handleTeraBox(ctx, videoUrl);
     if (success) {
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       user.credits += 1; // Refund credit on failure
-      await setUser(user.telegramId, user);
     }
   } catch (error) {
     console.error('Error in terabox command:', error);
     user.credits += 1; // Refund credit on error
-    await setUser(user.telegramId, user);
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
 
 // OSINT Commands
 bot.command('ip', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1532,31 +1252,28 @@ bot.command('ip', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please check the IP address and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ip command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching IP information.\n💳 1 credit refunded');
   }
 });
 
 bot.command('email', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1584,31 +1301,28 @@ bot.command('email', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, '❌ Failed to validate email address. Please check the email and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in email command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while validating email address.\n💳 1 credit refunded');
   }
 });
 
 bot.command('num', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1636,31 +1350,28 @@ bot.command('num', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, '❌ Failed to lookup phone number. Please check the number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in num command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up phone number.\n💳 1 credit refunded');
   }
 });
 
 bot.command('basicnum', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1688,32 +1399,29 @@ bot.command('basicnum', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, '❌ Failed to get basic number information. Please check the number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in basicnum command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while getting basic number information.\n💳 1 credit refunded');
   }
 });
 
 // UPDATED: Pakistani Government Number Information command
 bot.command('paknum', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1753,31 +1461,28 @@ bot.command('paknum', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, `❌ ${result.error || 'No records found for the provided number or CNIC'}\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in paknum command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani government number information.\n💳 1 credit refunded');
   }
 });
 
 bot.command('ig', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1805,31 +1510,28 @@ bot.command('ig', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, '❌ Failed to fetch Instagram information. Please check the username and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ig command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching Instagram information.\n💳 1 credit refunded');
   }
 });
 
 bot.command('bin', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1857,31 +1559,28 @@ bot.command('bin', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, '❌ Failed to lookup BIN information. Please check the BIN and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in bin command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up BIN information.\n💳 1 credit refunded');
   }
 });
 
 bot.command('vehicle', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1909,31 +1608,28 @@ bot.command('vehicle', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, '❌ Failed to fetch vehicle details. Please check the vehicle number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in vehicle command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching vehicle details.\n💳 1 credit refunded');
   }
 });
 
 bot.command('ff', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
   }
 
   // Check credits
-  if (!(await deductCredits(user))) {
+  if (!deductCredits(user)) {
     await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
@@ -1961,24 +1657,21 @@ bot.command('ff', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       // Refund credit on failure
       user.credits += 1;
-      await setUser(user.telegramId, user);
       await sendFormattedMessage(ctx, '❌ Failed to fetch Free Fire statistics. Please check the UID and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ff command:', error);
     // Refund credit on error
     user.credits += 1;
-    await setUser(user.telegramId, user);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching Free Fire statistics.\n💳 1 credit refunded');
   }
 });
 
 bot.command('myip', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
@@ -2015,7 +1708,6 @@ bot.command('myip', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please try again.');
     }
@@ -2026,7 +1718,7 @@ bot.command('myip', async (ctx) => {
 });
 
 bot.command('useragent', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
@@ -2060,7 +1752,7 @@ bot.command('useragent', async (ctx) => {
 });
 
 bot.command('tempmail', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
@@ -2089,7 +1781,6 @@ bot.command('tempmail', async (ctx) => {
 
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
-      await setUser(user.telegramId, user);
     } else {
       await sendFormattedMessage(ctx, '❌ Failed to generate temporary email.');
     }
@@ -2100,7 +1791,7 @@ bot.command('tempmail', async (ctx) => {
 });
 
 bot.command('stats', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
@@ -2124,7 +1815,7 @@ bot.command('stats', async (ctx) => {
 });
 
 bot.command('credits', async (ctx) => {
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
     return;
@@ -2188,7 +1879,6 @@ bot.command('help', async (ctx) => {
 • /credits - Check your credit balance
 • /checkstatus - Check registration status
 • /sync - Sync registration (if approved but lost access)
-• /help - Show this help message
 
 💎 Premium Benefits:
 • 🔄 Unlimited queries per day
@@ -2226,17 +1916,17 @@ bot.command('admin', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
   // Check if user is admin (either original admin or made admin)
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const user = await getOrCreateUser(ctx);
+  const user = getOrCreateUser(ctx);
 
-  const registrationRequests = await getAllRegistrationRequests();
-  const allUsers = await getAllUsers();
-  const approvedUsers = allUsers.filter(u => u.isApproved);
-  const premiumUsers = allUsers.filter(u => u.isPremium);
+  const pendingCount = registrationRequests.size;
+  const totalUsers = users.size;
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved).length;
+  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
 
   const adminPanel = `🌟 ⚡ ELITE ADMIN CONTROL PANEL ⚡ 🌟
 
@@ -2284,11 +1974,11 @@ bot.command('admin', async (ctx) => {
 • /backup - 💾 Create database backup
 
 📊 Current Statistics:
-• 👥 Total Users: ${allUsers.length}
-• ✅ Approved Users: ${approvedUsers.length}
-• 💎 Premium Users: ${premiumUsers.length}
-• ⏳ Pending Registrations: ${registrationRequests.length}
-• 🔧 Maintenance Mode: ${await getMaintenanceMode() ? 'ON' : 'OFF'}
+• 👥 Total Users: ${totalUsers}
+• ✅ Approved Users: ${approvedUsers}
+• 💎 Premium Users: ${premiumUsers}
+• ⏳ Pending Registrations: ${pendingCount}
+• 🔧 Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
 
 ⚡ 🌟 Unlimited Power • Unlimited Possibilities 🌟 ⚡
 
@@ -2301,7 +1991,7 @@ bot.command('admin', async (ctx) => {
 bot.command('give', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2320,14 +2010,13 @@ bot.command('give', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
   }
 
   targetUser.credits += amount;
-  await setUser(targetUserId, targetUser);
 
   const userMessage = `🎉 Credits Received! 🎉
 
@@ -2355,7 +2044,7 @@ bot.command('give', async (ctx) => {
 bot.command('remove', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2374,7 +2063,7 @@ bot.command('remove', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
@@ -2386,7 +2075,6 @@ bot.command('remove', async (ctx) => {
   }
 
   targetUser.credits -= amount;
-  await setUser(targetUserId, targetUser);
 
   const userMessage = `💸 Credits Deducted 💸
 
@@ -2414,7 +2102,7 @@ bot.command('remove', async (ctx) => {
 bot.command('giveall', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2425,8 +2113,7 @@ bot.command('giveall', async (ctx) => {
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const approvedUsers = allUsers.filter(u => u.isApproved);
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
   
   if (approvedUsers.length === 0) {
     await sendFormattedMessage(ctx, '⚠️ No approved users found to give credits to.');
@@ -2438,7 +2125,6 @@ bot.command('giveall', async (ctx) => {
 
   for (const user of approvedUsers) {
     user.credits += amount;
-    await setUser(user.telegramId, user);
     successCount++;
     totalAmount += amount;
 
@@ -2472,7 +2158,7 @@ bot.command('giveall', async (ctx) => {
 bot.command('removeall', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2483,8 +2169,7 @@ bot.command('removeall', async (ctx) => {
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const approvedUsers = allUsers.filter(u => u.isApproved);
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
   
   if (approvedUsers.length === 0) {
     await sendFormattedMessage(ctx, '⚠️ No approved users found to remove credits from.');
@@ -2497,7 +2182,6 @@ bot.command('removeall', async (ctx) => {
   for (const user of approvedUsers) {
     if (user.credits >= amount) {
       user.credits -= amount;
-      await setUser(user.telegramId, user);
       successCount++;
       totalAmount += amount;
 
@@ -2532,7 +2216,7 @@ bot.command('removeall', async (ctx) => {
 bot.command('setcredits', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2551,7 +2235,7 @@ bot.command('setcredits', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
@@ -2559,7 +2243,6 @@ bot.command('setcredits', async (ctx) => {
 
   const oldCredits = targetUser.credits;
   targetUser.credits = amount;
-  await setUser(targetUserId, targetUser);
 
   const userMessage = amount > oldCredits ? 
     `🎉 Credits Updated! 🎉
@@ -2575,7 +2258,7 @@ bot.command('setcredits', async (ctx) => {
 💳 New Balance: ${targetUser.credits} credits
 👤 Updated by: Admin
 
-📝 If you have questions about this change, please contact support`;
+📝 If you have questions about this change, please contact support.`;
 
   await notifyUser(targetUserId, userMessage);
 
@@ -2595,7 +2278,7 @@ bot.command('setcredits', async (ctx) => {
 bot.command('premium', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2606,14 +2289,13 @@ bot.command('premium', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
   }
 
   targetUser.isPremium = !targetUser.isPremium;
-  await setUser(targetUserId, targetUser);
   const action = targetUser.isPremium ? 'granted' : 'revoked';
 
   const userMessage = targetUser.isPremium ? 
@@ -2655,7 +2337,7 @@ bot.command('premium', async (ctx) => {
 bot.command('makeadmin', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2666,7 +2348,7 @@ bot.command('makeadmin', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
@@ -2678,7 +2360,6 @@ bot.command('makeadmin', async (ctx) => {
   }
 
   targetUser.isAdmin = true;
-  await setUser(targetUserId, targetUser);
 
   const userMessage = `👑 Admin Access Granted! 👑
 
@@ -2712,7 +2393,7 @@ bot.command('makeadmin', async (ctx) => {
 bot.command('removeadmin', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2723,7 +2404,7 @@ bot.command('removeadmin', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
@@ -2740,7 +2421,6 @@ bot.command('removeadmin', async (ctx) => {
   }
 
   targetUser.isAdmin = false;
-  await setUser(targetUserId, targetUser);
 
   const userMessage = `🚫 Admin Access Removed 🚫
 
@@ -2769,7 +2449,7 @@ bot.command('removeadmin', async (ctx) => {
 bot.command('checkuser', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2780,7 +2460,7 @@ bot.command('checkuser', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
@@ -2812,13 +2492,12 @@ bot.command('checkuser', async (ctx) => {
 bot.command('users', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const userList = allUsers.map((u, index) => {
+  const userList = Array.from(users.values()).map((u, index) => {
     const status = u.isPremium ? '💎' : u.isApproved ? '✅' : '⏳';
     const adminBadge = u.isAdmin ? '👑' : '';
     return `${index + 1}. ${status}${adminBadge} @${u.username || 'N/A'} (${u.telegramId}) - ${u.credits} credits`;
@@ -2826,10 +2505,10 @@ bot.command('users', async (ctx) => {
 
   const response = `📋 User List 📋
 
-👥 Total Users: ${allUsers.length}
-💎 Premium Users: ${allUsers.filter(u => u.isPremium).length}
-✅ Approved Users: ${allUsers.filter(u => u.isApproved).length}
-👑 Admins: ${allUsers.filter(u => u.isAdmin).length}
+👥 Total Users: ${users.size}
+💎 Premium Users: ${Array.from(users.values()).filter(u => u.isPremium).length}
+✅ Approved Users: ${Array.from(users.values()).filter(u => u.isApproved).length}
+👑 Admins: ${Array.from(users.values()).filter(u => u.isAdmin).length}
 
 📊 User Details:
  ${userList}
@@ -2842,13 +2521,12 @@ bot.command('users', async (ctx) => {
 bot.command('topusers', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const topUsers = allUsers
+  const topUsers = Array.from(users.values())
     .filter(u => u.isApproved)
     .sort((a, b) => b.totalQueries - a.totalQueries)
     .slice(0, 10);
@@ -2882,13 +2560,12 @@ bot.command('topusers', async (ctx) => {
 bot.command('premiumlist', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const premiumUsers = allUsers.filter(u => u.isPremium);
+  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium);
 
   if (premiumUsers.length === 0) {
     await sendFormattedMessage(ctx, '💎 No premium users found.');
@@ -2917,25 +2594,23 @@ bot.command('premiumlist', async (ctx) => {
 bot.command('registrations', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const registrationRequests = await getAllRegistrationRequests();
-  
-  if (registrationRequests.length === 0) {
+  if (registrationRequests.size === 0) {
     await sendFormattedMessage(ctx, '📋 No Pending Registrations 📋\n\n✅ All registration requests have been processed.');
     return;
   }
 
-  const registrationList = registrationRequests.map((req, index) => {
+  const registrationList = Array.from(registrationRequests.values()).map((req, index) => {
     return `${index + 1}. ⏳ @${req.username || 'N/A'} (${req.telegramId}) - ${req.timestamp.toLocaleDateString()}`;
   }).join('\n');
 
   const response = `📋 Pending Registration Requests 📋
 
-👥 Total Pending: ${registrationRequests.length}
+👥 Total Pending: ${registrationRequests.size}
 
 📊 Registration List:
  ${registrationList}
@@ -2951,7 +2626,7 @@ bot.command('registrations', async (ctx) => {
 bot.command('approve', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -2962,13 +2637,13 @@ bot.command('approve', async (ctx) => {
     return;
   }
 
-  const request = await getRegistrationRequest(targetUserId);
+  const request = registrationRequests.get(targetUserId);
   if (!request) {
     await sendFormattedMessage(ctx, '❌ Registration request not found.');
     return;
   }
 
-  const user = await getUser(targetUserId) || {
+  const user = users.get(targetUserId) || {
     telegramId: targetUserId,
     username: request.username,
     firstName: request.firstName,
@@ -2983,9 +2658,9 @@ bot.command('approve', async (ctx) => {
 
   user.isApproved = true;
   user.credits = 25;
-  await setUser(targetUserId, user);
-  await deleteRegistrationRequest(targetUserId);
-  await setUserRegistered(targetUserId);
+  users.set(targetUserId, user);
+  registrationRequests.delete(targetUserId);
+  registeredUsers.add(targetUserId);
 
   const userMessage = `🎉 Registration Approved! 🎉
 
@@ -3025,7 +2700,7 @@ bot.command('approve', async (ctx) => {
 bot.command('reject', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -3036,13 +2711,13 @@ bot.command('reject', async (ctx) => {
     return;
   }
 
-  const request = await getRegistrationRequest(targetUserId);
+  const request = registrationRequests.get(targetUserId);
   if (!request) {
     await sendFormattedMessage(ctx, '❌ Registration request not found.');
     return;
   }
 
-  await deleteRegistrationRequest(targetUserId);
+  registrationRequests.delete(targetUserId);
 
   const userMessage = `❌ Registration Rejected ❌
 
@@ -3077,26 +2752,25 @@ bot.command('reject', async (ctx) => {
 bot.command('approveall', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const registrationRequests = await getAllRegistrationRequests();
-  
-  if (registrationRequests.length === 0) {
+  if (registrationRequests.size === 0) {
     await sendFormattedMessage(ctx, '📋 No Pending Registrations 📋\n\n✅ All registration requests have been processed.');
     return;
   }
 
+  const pendingRequests = Array.from(registrationRequests.values());
   const approvedUsers = [];
 
   // Process all pending registrations
-  for (const request of registrationRequests) {
+  for (const request of registrationRequests.values()) {
     const targetUserId = request.telegramId;
     
     // Check if user already exists
-    let user = await getUser(targetUserId);
+    let user = users.get(targetUserId);
     if (!user) {
       user = {
         telegramId: targetUserId,
@@ -3115,8 +2789,8 @@ bot.command('approveall', async (ctx) => {
     // Approve user
     user.isApproved = true;
     user.credits = 25; // Give starting credits
-    await setUser(targetUserId, user);
-    await setUserRegistered(targetUserId);
+    users.set(targetUserId, user);
+    registeredUsers.add(targetUserId);
     approvedUsers.push({
       userId: targetUserId,
       username: request.username || 'N/A'
@@ -3143,10 +2817,8 @@ bot.command('approveall', async (ctx) => {
   }
 
   // Clear all registration requests
-  const totalApproved = registrationRequests.length;
-  for (const request of registrationRequests) {
-    await deleteRegistrationRequest(request.telegramId);
-  }
+  const totalApproved = pendingRequests.length;
+  registrationRequests.clear();
 
   // Send confirmation to admin
   const adminMessage = `✅ All Registrations Approved Successfully ✅
@@ -3173,18 +2845,17 @@ bot.command('approveall', async (ctx) => {
 bot.command('adminstats', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const totalUsers = allUsers.length;
-  const approvedUsers = allUsers.filter(u => u.isApproved).length;
-  const premiumUsers = allUsers.filter(u => u.isPremium).length;
-  const adminUsers = allUsers.filter(u => u.isAdmin).length;
-  const totalQueries = allUsers.reduce((sum, u) => sum + u.totalQueries, 0);
-  const registrationRequests = await getAllRegistrationRequests();
+  const totalUsers = users.size;
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved).length;
+  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
+  const adminUsers = Array.from(users.values()).filter(u => u.isAdmin).length;
+  const totalQueries = Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0);
+  const pendingRegistrations = registrationRequests.size;
 
   const statsMessage = `📊 Admin Statistics Dashboard 📊
 
@@ -3193,7 +2864,7 @@ bot.command('adminstats', async (ctx) => {
 • Approved Users: ${approvedUsers}
 • Premium Users: ${premiumUsers}
 • Admin Users: ${adminUsers}
-• Pending Registrations: ${registrationRequests.length}
+• Pending Registrations: ${pendingRegistrations}
 
 📈 Usage Statistics:
 • Total Queries: ${totalQueries}
@@ -3205,8 +2876,8 @@ bot.command('adminstats', async (ctx) => {
 
 🔧 System Health:
 • Bot Status: ✅ Online
-• Database: ✅ Connected (Redis)
-• Maintenance Mode: ${await getMaintenanceMode() ? 'ON' : 'OFF'}
+• Database: ✅ Connected
+• Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
 • Last Update: ${new Date().toLocaleString()}`;
 
   await sendFormattedMessage(ctx, statsMessage);
@@ -3215,13 +2886,12 @@ bot.command('adminstats', async (ctx) => {
 bot.command('activity', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const recentUsers = allUsers
+  const recentUsers = Array.from(users.values())
     .filter(u => u.isApproved)
     .sort((a, b) => b.totalQueries - a.totalQueries)
     .slice(0, 10);
@@ -3248,14 +2918,13 @@ bot.command('activity', async (ctx) => {
 bot.command('revenue', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const premiumUsers = allUsers.filter(u => u.isPremium).length;
-  const totalUsers = allUsers.filter(u => u.isApproved).length;
+  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
+  const totalUsers = Array.from(users.values()).filter(u => u.isApproved).length;
   
   const monthlyPremiumPrice = 9.99;
   const estimatedMonthlyRevenue = premiumUsers * monthlyPremiumPrice;
@@ -3285,7 +2954,7 @@ bot.command('revenue', async (ctx) => {
 bot.command('broadcast', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -3298,8 +2967,7 @@ bot.command('broadcast', async (ctx) => {
 
   await sendFormattedMessage(ctx, '📢 Preparing broadcast...');
 
-  const allUsers = await getAllUsers();
-  const approvedUsers = allUsers.filter(u => u.isApproved);
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
   let successCount = 0;
   let failCount = 0;
 
@@ -3332,7 +3000,7 @@ bot.command('broadcast', async (ctx) => {
 bot.command('announce', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -3353,8 +3021,7 @@ bot.command('announce', async (ctx) => {
 
   await sendFormattedMessage(ctx, '🎭 Preparing rich announcement...');
 
-  const allUsers = await getAllUsers();
-  const approvedUsers = allUsers.filter(u => u.isApproved);
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
   let successCount = 0;
   let failCount = 0;
 
@@ -3395,7 +3062,7 @@ bot.command('announce', async (ctx) => {
 bot.command('maintenance', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -3409,25 +3076,24 @@ bot.command('maintenance', async (ctx) => {
   const action = args[0].toLowerCase();
   
   if (action === 'on') {
-    await setMaintenanceMode(true);
-    const message = args.slice(1).join(' ') || "Bot is currently under maintenance. Please try again later.";
-    await setMaintenanceMessage(message);
+    maintenanceMode = true;
+    maintenanceMessage = args.slice(1).join(' ') || "Bot is currently under maintenance. Please try again later.";
     
     await sendFormattedMessage(ctx, `⚙️ Maintenance Mode Enabled ⚙️
 
 ✅ Settings Updated:
 • Status: Maintenance ON
-• Message: "${message}"
+• Message: "${maintenanceMessage}"
 • Admin: @${ctx.from?.username}
 
 🔧 All non-admin users will now see the maintenance message when using the bot.`);
     
     // Notify all users about maintenance
-    const allUsers = await getAllUsers();
-    for (const user of allUsers) {
+    const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
+    for (const user of approvedUsers) {
       try {
-        if (!(await isAdmin(user.telegramId))) {
-          await notifyUser(user.telegramId, message);
+        if (!isAdmin(user.telegramId)) {
+          await notifyUser(user.telegramId, maintenanceMessage);
         }
       } catch (error) {
         console.error(`Failed to notify user ${user.telegramId} about maintenance:`, error);
@@ -3435,7 +3101,7 @@ bot.command('maintenance', async (ctx) => {
     }
   } 
   else if (action === 'off') {
-    await setMaintenanceMode(false);
+    maintenanceMode = false;
     
     await sendFormattedMessage(ctx, `⚙️ Maintenance Mode Disabled ⚙️
 
@@ -3453,7 +3119,7 @@ bot.command('maintenance', async (ctx) => {
 bot.command('lucky', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -3464,8 +3130,7 @@ bot.command('lucky', async (ctx) => {
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const approvedUsers = allUsers.filter(u => u.isApproved);
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved);
   
   if (approvedUsers.length === 0) {
     await sendFormattedMessage(ctx, '❌ No approved users found for lucky draw.');
@@ -3476,7 +3141,6 @@ bot.command('lucky', async (ctx) => {
   const luckyUser = approvedUsers[randomIndex];
 
   luckyUser.credits += amount;
-  await setUser(luckyUser.telegramId, luckyUser);
 
   const userMessage = `🍀 Lucky Draw Winner! 🍀
 
@@ -3513,13 +3177,12 @@ bot.command('lucky', async (ctx) => {
 bot.command('masspremium', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const approvedUsers = allUsers.filter(u => u.isApproved && !u.isPremium);
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved && !u.isPremium);
   
   if (approvedUsers.length === 0) {
     await sendFormattedMessage(ctx, '⚠️ No approved non-premium users found for mass premium upgrade.');
@@ -3532,7 +3195,6 @@ bot.command('masspremium', async (ctx) => {
   for (const user of approvedUsers) {
     try {
       user.isPremium = true;
-      await setUser(user.telegramId, user);
       successCount++;
 
       // Notify user
@@ -3572,13 +3234,12 @@ bot.command('masspremium', async (ctx) => {
 bot.command('massremovepremium', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const premiumUsers = allUsers.filter(u => u.isPremium && !u.isAdmin);
+  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium && !u.isAdmin);
   
   if (premiumUsers.length === 0) {
     await sendFormattedMessage(ctx, '⚠️ No premium users found for mass premium removal.');
@@ -3591,7 +3252,6 @@ bot.command('massremovepremium', async (ctx) => {
   for (const user of premiumUsers) {
     try {
       user.isPremium = false;
-      await setUser(user.telegramId, user);
       successCount++;
 
       // Notify user
@@ -3628,7 +3288,7 @@ bot.command('massremovepremium', async (ctx) => {
 bot.command('removepremium', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -3639,7 +3299,7 @@ bot.command('removepremium', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
@@ -3651,7 +3311,6 @@ bot.command('removepremium', async (ctx) => {
   }
 
   targetUser.isPremium = false;
-  await setUser(targetUserId, targetUser);
 
   const userMessage = `💳 Premium Status Revoked 💳
 
@@ -3681,18 +3340,16 @@ bot.command('removepremium', async (ctx) => {
 bot.command('reset_daily', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
   // Reset daily query counts for all users
-  const allUsers = await getAllUsers();
   let resetCount = 0;
-  for (const user of allUsers) {
+  for (const [userId, user] of users.entries()) {
     if (user.totalQueries > 0) {
       user.totalQueries = 0;
-      await setUser(user.telegramId, user);
       resetCount++;
     }
   }
@@ -3713,7 +3370,7 @@ bot.command('reset_daily', async (ctx) => {
 bot.command('resetuser', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
@@ -3724,7 +3381,7 @@ bot.command('resetuser', async (ctx) => {
     return;
   }
 
-  const targetUser = await getUser(targetUserId);
+  const targetUser = users.get(targetUserId);
   if (!targetUser) {
     await sendFormattedMessage(ctx, '❌ User not found.');
     return;
@@ -3740,7 +3397,6 @@ bot.command('resetuser', async (ctx) => {
   targetUser.totalQueries = 0;
   targetUser.isPremium = false;
   // Keep admin status to avoid removing admin access accidentally
-  await setUser(targetUserId, targetUser);
 
   const userMessage = `🔄 Account Reset 🔄
 
@@ -3776,35 +3432,33 @@ bot.command('resetuser', async (ctx) => {
 bot.command('logs', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
-  const allUsers = await getAllUsers();
-  const totalUsers = allUsers.length;
-  const approvedUsers = allUsers.filter(u => u.isApproved).length;
-  const premiumUsers = allUsers.filter(u => u.isPremium).length;
-  const adminUsers = allUsers.filter(u => u.isAdmin).length;
-  const totalQueries = allUsers.reduce((sum, u) => sum + u.totalQueries, 0);
-  const registrationRequests = await getAllRegistrationRequests();
-  const verifiedUsers = await getAllVerifiedUsers();
+  const totalUsers = users.size;
+  const approvedUsers = Array.from(users.values()).filter(u => u.isApproved).length;
+  const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
+  const adminUsers = Array.from(users.values()).filter(u => u.isAdmin).length;
+  const totalQueries = Array.from(users.values()).reduce((sum, u) => sum + u.totalQueries, 0);
+  const pendingRegistrations = registrationRequests.size;
+  const verifiedCount = verifiedUsers.size;
 
   const message = `📜 System Logs 📜
 
 📊 Current System Status:
 • Bot: ✅ Online
-• Database: ✅ Connected (Redis)
 • Total Users: ${totalUsers}
 • Approved Users: ${approvedUsers}
 • Premium Users: ${premiumUsers}
 • Admin Users: ${adminUsers}
-• Verified Users: ${verifiedUsers.length}
-• Pending Registrations: ${registrationRequests.length}
+• Verified Users: ${verifiedCount}
+• Pending Registrations: ${pendingRegistrations}
 • Total Queries: ${totalQueries}
 
 🔧 System Configuration:
-• Maintenance Mode: ${await getMaintenanceMode() ? 'ON' : 'OFF'}
+• Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
 • Bot Start Time: ${new Date().toLocaleString()}
 • Admin ID: ${adminId}
 
@@ -3817,15 +3471,14 @@ bot.command('logs', async (ctx) => {
 bot.command('backup', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
-  if (!telegramId || !(await isAdmin(telegramId))) {
+  if (!telegramId || !isAdmin(telegramId)) {
     await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
     return;
   }
 
   // Create backup data
-  const allUsers = await getAllUsers();
-  const usersData = allUsers.map(user => ({
-    id: user.telegramId,
+  const usersData = Array.from(users.entries()).map(([id, user]) => ({
+    id,
     username: user.username,
     firstName: user.firstName,
     lastName: user.lastName,
@@ -3837,9 +3490,8 @@ bot.command('backup', async (ctx) => {
     registrationDate: user.registrationDate
   }));
 
-  const registrationRequests = await getAllRegistrationRequests();
-  const registrationsData = registrationRequests.map(request => ({
-    id: request.telegramId,
+  const registrationsData = Array.from(registrationRequests.entries()).map(([id, request]) => ({
+    id,
     username: request.username,
     firstName: request.firstName,
     lastName: request.lastName,
@@ -3847,15 +3499,15 @@ bot.command('backup', async (ctx) => {
     timestamp: request.timestamp
   }));
 
-  const verifiedUsers = await getAllVerifiedUsers();
+  const verifiedData = Array.from(verifiedUsers);
 
   const backupData = {
     timestamp: new Date().toISOString(),
     users: usersData,
     registrations: registrationsData,
-    verifiedUsers: verifiedUsers,
-    maintenanceMode: await getMaintenanceMode(),
-    maintenanceMessage: await getMaintenanceMessage()
+    verifiedUsers: verifiedData,
+    maintenanceMode,
+    maintenanceMessage
   };
 
   // Convert to JSON string
@@ -3872,7 +3524,7 @@ bot.command('backup', async (ctx) => {
 📊 Backup Details:
 • Users: ${usersData.length}
 • Registrations: ${registrationsData.length}
-• Verified Users: ${verifiedUsers.length}
+• Verified Users: ${verifiedData.length}
 • Timestamp: ${new Date().toLocaleString()}
 
 💾 Keep this file safe for future restoration if needed`
@@ -3890,8 +3542,8 @@ bot.command('checkstatus', async (ctx) => {
   
   if (!telegramId) return;
 
-  // Check if user exists in Redis
-  const user = await getUser(telegramId);
+  // Check if user exists in users map
+  const user = users.get(telegramId);
   if (user) {
     const statusMessage = `📋 Your Registration Status 📋
 
@@ -3909,12 +3561,12 @@ bot.command('checkstatus', async (ctx) => {
     await sendFormattedMessage(ctx, statusMessage);
   } else {
     // Check if there's a pending registration request
-    const request = await getRegistrationRequest(telegramId);
+    const request = registrationRequests.get(telegramId);
     if (request) {
       await sendFormattedMessage(ctx, '⏳ Your registration is pending approval.\n\nPlease wait for the admin to review your request.');
     } else {
       // Check if user has verified channel membership
-      if (await isUserVerified(telegramId)) {
+      if (verifiedUsers.has(telegramId)) {
         await sendFormattedMessage(ctx, '✅ You have verified your channel membership! You can now proceed with registration using /register.');
       } else {
         // Create inline keyboard with join and verify buttons
@@ -3922,7 +3574,7 @@ bot.command('checkstatus', async (ctx) => {
           .url("📢 Join Updates Channel", CHANNEL_URL)
           .text("✅ Verify Membership", `verify_${telegramId}`);
         
-        await ctx.reply('❌ No registration found.\n\nPlease join the updates channel and verify your membership before registering.', { reply_markup: keyboard });
+        await sendFormattedMessage(ctx, '❌ No registration found.\n\nPlease join the updates channel and verify your membership before registering.', keyboard);
       }
     }
   }
@@ -3934,7 +3586,7 @@ bot.command('sync', async (ctx) => {
   
   if (!telegramId) return;
 
-  const user = await getUser(telegramId);
+  const user = users.get(telegramId);
   if (user && user.isApproved) {
     await sendFormattedMessage(ctx, '✅ Your account is already synced and approved!');
     return;
@@ -3954,7 +3606,7 @@ bot.command('sync', async (ctx) => {
       totalQueries: 0,
       registrationDate: new Date()
     };
-    await setUser(telegramId, adminUser);
+    users.set(telegramId, adminUser);
     await sendFormattedMessage(ctx, '✅ Admin account synced successfully!');
     return;
   }
@@ -4005,14 +3657,12 @@ bot.catch((err) => {
 // Graceful shutdown handling
 process.on('SIGINT', () => {
   console.log('\n🛑 Received SIGINT, shutting down gracefully...');
-  redis.disconnect();
   bot.stop();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
-  redis.disconnect();
   bot.stop();
   process.exit(0);
 });
@@ -4032,7 +3682,6 @@ bot.start().then(() => {
   console.log('🔧 Real maintenance mode functionality is now active!');
   console.log('📢 Channel membership verification is now active!');
   console.log('🇵🇰 Updated Pakistani government number lookup with new API endpoint!');
-  console.log('💾 Redis database integration is now active!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
