@@ -38,6 +38,9 @@ const verifiedUsers = new Set(); // Track users who have verified channel member
 const registeredUsers = new Set(); // Track users who have completed registration
 const adminId = process.env.ADMIN_USER_ID;
 
+
+// Public admin contact (shown to users)
+const ADMIN_CONTACT = '@fuck_sake';
 // Maintenance mode flag (stored in memory, will reset on bot restart)
 let maintenanceMode = false;
 let maintenanceMessage = "Bot is currently under maintenance. Please try again later.";
@@ -142,7 +145,7 @@ if (!adminId) {
 
 console.log('✅ Environment variables loaded successfully');
 console.log(`🤖 Bot Token: ${botToken.substring(0, 10)}...`);
-console.log(`👑 Admin ID: ${adminId}`);
+console.log(`👑 Admin: ${ADMIN_CONTACT}`);
 
 // Initialize admin user
 users.set(adminId, {
@@ -2543,7 +2546,7 @@ bot.command('credits', async (ctx) => {
 
 🎁 Want more credits?
 • Upgrade to Premium for unlimited access
-• Contact admin for credit requests
+• Contact admin: @fuck_sake
 
 💡 Each query consumes 1 credit`;
 
@@ -3046,7 +3049,7 @@ bot.command('premium', async (ctx) => {
 📋 Status Changed:
 • Premium access revoked
 • Back to standard features
-• Contact admin for details
+• Contact admin: @fuck_sake
 
 📞 If you have questions, please reach out to support`;
 
@@ -3991,7 +3994,7 @@ bot.command('massremovepremium', async (ctx) => {
 📋 Status Changed:
 • Premium access revoked
 • Back to standard features
-• Contact admin for details
+• Contact admin: @fuck_sake
 
 📞 If you have questions about this change, please reach out to support`;
 
@@ -4048,7 +4051,7 @@ bot.command('removepremium', async (ctx) => {
 📋 Status Changed:
 • Premium access revoked
 • Back to standard features
-• Contact admin for details
+• Contact admin: @fuck_sake
 
 📞 If you have questions about this change, please reach out to support`;
 
@@ -4139,7 +4142,7 @@ bot.command('resetuser', async (ctx) => {
 • Premium: ${wasPremium ? 'Yes → No' : 'No'}
 • Admin: ${wasAdmin ? 'Yes (unchanged)' : 'No'}
 
-📞 If you have questions about this reset, please contact admin`;
+📞 If you have questions about this reset, please contact admin: @fuck_sake`;
 
   await notifyUser(targetUserId, userMessage);
 
@@ -4191,7 +4194,7 @@ bot.command('logs', async (ctx) => {
 🔧 System Configuration:
 • Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
 • Bot Start Time: ${new Date().toLocaleString()}
-• Admin ID: ${adminId}
+• Admin: ${ADMIN_CONTACT}
 
 📝 Note: This is a basic log overview. For detailed logs, check your hosting provider's logs.`;
 
@@ -4651,7 +4654,7 @@ process.on('SIGTERM', () => {
 // ===============================
 console.log('🚀 Starting Premium OSINT Bot with Complete Admin Panel & Registration Management...');
 console.log(`🤖 Bot Username: @OsintShit_Bot`);
-console.log(`👑 Admin ID: ${adminId}`);
+console.log(`👑 Admin: ${ADMIN_CONTACT}`);
 console.log('📡 Starting polling...');
 
 bot.start().then(() => {
