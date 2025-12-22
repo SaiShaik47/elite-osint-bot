@@ -205,6 +205,114 @@ async function getFreeFireStats(uid) {
   }
 }
 
+// ===============================
+// INDIA POSTAL (PINCODE / POST OFFICE)
+// ===============================
+async function getIndiaPincodeInfo(pincode) {
+  try {
+    const res = await axios.get(`https://api.postalpincode.in/pincode/${encodeURIComponent(pincode)}`, { timeout: 20000 });
+    return { success: true, data: res.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch India pincode information' };
+  }
+}
+
+async function getIndiaPostOfficeInfo(query) {
+  try {
+    const res = await axios.get(`https://api.postalpincode.in/postoffice/${encodeURIComponent(query)}`, { timeout: 20000 });
+    return { success: true, data: res.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch India post office information' };
+  }
+}
+
+// ===============================
+// PAK REHU LOOKUP (SEPARATE /pak)
+// ===============================
+async function getRehuPakInfo(query) {
+  try {
+    const res = await axios.get(`https://rehu-pak-info.vercel.app/api/lookup?query=${encodeURIComponent(query)}&pretty=1`, { timeout: 30000 });
+    return { success: true, data: res.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch /pak lookup information' };
+  }
+}
+
+// ===============================
+// IFSC LOOKUP (TEXT OUTPUT)
+// ===============================
+async function getIfscInfo(ifsc) {
+  try {
+    const res = await axios.get(`https://ab-ifscinfoapi.vercel.app/info?ifsc=${encodeURIComponent(ifsc)}`, { timeout: 20000 });
+    return { success: true, data: res.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch IFSC information' };
+  }
+}
+
+// ===============================
+// YOUTUBE THUMBNAIL (SEND AS IMAGE)
+// ===============================
+async function sendYouTubeThumb(ctx, ytUrl) {
+  // Worker returns an image for the provided youtube URL
+  const thumbApi = `https://old-studio-thum-down.oldhacker7866.workers.dev/?url=${encodeURIComponent(ytUrl)}`;
+  // Telegram can fetch photo by URL directly if it's publicly accessible (https)
+  await ctx.replyWithPhoto(thumbApi, { caption: `🖼️ YouTube Thumbnail\n\n🔗 ${ytUrl}` });
+}
+
+
+/**
+ * SPLEXX Image Generator (send direct image)
+ * API: https://splexx-api-img.vercel.app/api/imggen?text=...&key=SPLEXXO
+ */
+async function sendSplexxImage(ctx, promptText) {
+  const apiUrl = `https://splexx-api-img.vercel.app/api/imggen?text=${encodeURIComponent(promptText)}&key=SPLEXXO`;
+
+  try {
+    // First try: treat response as raw image
+    const res = await axios.get(apiUrl, { timeout: 45000, responseType: 'arraybuffer', validateStatus: () => true });
+    const ct = (res.headers && (res.headers['content-type'] || res.headers['Content-Type']))
+      ? String(res.headers['content-type'] || res.headers['Content-Type']).toLowerCase()
+      : '';
+
+    if (res.status >= 200 && res.status < 300 && ct.startsWith('image/')) {
+      const buf = Buffer.from(res.data);
+      await ctx.replyWithPhoto(
+        { source: buf },
+        { caption: `🖼️ Image Generated\n\n✍️ Prompt: ${promptText}` }
+      );
+      return { success: true };
+    }
+
+    // If not an image, try parsing JSON to find an URL
+    let jsonObj = null;
+    try {
+      const asText = Buffer.from(res.data || '').toString('utf-8');
+      jsonObj = JSON.parse(asText);
+    } catch (_) {}
+
+    const foundUrl = findFirstUrlDeep(jsonObj);
+    if (foundUrl) {
+      const imgRes = await axios.get(foundUrl, { timeout: 45000, responseType: 'arraybuffer' });
+      const buf = Buffer.from(imgRes.data);
+      await ctx.replyWithPhoto(
+        { source: buf },
+        { caption: `🖼️ Image Generated\n\n✍️ Prompt: ${promptText}` }
+      );
+      return { success: true };
+    }
+
+    // Last fallback: let Telegram fetch by URL
+    await ctx.replyWithPhoto(apiUrl, { caption: `🖼️ Image Generated\n\n✍️ Prompt: ${promptText}` });
+    return { success: true };
+  } catch (error) {
+    console.error('sendSplexxImage error:', error);
+    return { success: false, error: 'Failed to generate image' };
+  }
+}
+
+
+
 // NEW: Pakistani Government Number Information API
 async function getPakistaniGovtNumberInfo(number) {
   try {
@@ -781,6 +889,10 @@ Your account is pending approval by our admin team.
 • /num <number> - Phone number lookup
 • /basicnum <number> - Basic number information
 • /paknum <number> - Pakistani government number lookup
+• /pak <query> - Pakistan lookup (rehu)
+• /pincode <pincode> - India pincode lookup
+• /postoffice <name> - India post office search
+• /ifsc <ifsc> - IFSC bank details
 • /ig <username> - Instagram intelligence
 • /bin <number> - BIN lookup
 • /vehicle <number> - Vehicle details
@@ -793,6 +905,8 @@ Your account is pending approval by our admin team.
 • /pin <url> - Pinterest video downloader
 • /fb <url> - Facebook video downloader
 • /terabox <url> - TeraBox video downloader
+• /thumb <url> - YouTube thumbnail (image)
+• /thumb <url> - YouTube thumbnail (image)
 
 📊 System Commands:
 • /myip - Your IP information
@@ -1473,6 +1587,221 @@ bot.command('paknum', async (ctx) => {
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani government number information.\n💳 1 credit refunded');
   }
 });
+// ===============================
+// INDIA POSTAL COMMANDS
+// ===============================
+bot.command('pincode', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const pincode = (ctx.match || '').toString().trim();
+  if (!pincode) {
+    await sendFormattedMessage(ctx, '📮 Usage: /pincode <6-digit pincode>\n\nExample: /pincode 400001');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '📮 Fetching India pincode information...');
+
+  try {
+    const result = await getIndiaPincodeInfo(pincode);
+    if (result.success && result.data) {
+      const response = `📮 India Pincode Lookup 📮\n\n🔎 Query: \`${escapeMd(pincode)}\`\n\n\`\`\`json\n${JSON.stringify(result.data, null, 2)}\n\`\`\`\n\n• 1 credit deducted from your balance`;
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to fetch pincode info'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in pincode command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching pincode info.\n💳 1 credit refunded');
+  }
+});
+
+bot.command('postoffice', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const query = (ctx.match || '').toString().trim();
+  if (!query) {
+    await sendFormattedMessage(ctx, '🏤 Usage: /postoffice <name>\n\nExample: /postoffice Delhi');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🏤 Searching India Post Office data...');
+
+  try {
+    const result = await getIndiaPostOfficeInfo(query);
+    if (result.success && result.data) {
+      const response = `🏤 India Post Office Search 🏤\n\n🔎 Query: \`${escapeMd(query)}\`\n\n\`\`\`json\n${JSON.stringify(result.data, null, 2)}\n\`\`\`\n\n• 1 credit deducted from your balance`;
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to fetch post office info'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in postoffice command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching post office info.\n💳 1 credit refunded');
+  }
+});
+
+// ===============================
+// /pak (DO NOT REPLACE /paknum)
+// ===============================
+bot.command('pak', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const query = (ctx.match || '').toString().trim();
+  if (!query) {
+    await sendFormattedMessage(ctx, '🇵🇰 Usage: /pak <query>\n\nExample: /pak 2150952917167');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🇵🇰 Looking up Pakistan info...');
+
+  try {
+    const result = await getRehuPakInfo(query);
+    if (result.success && result.data) {
+      const response = `🇵🇰 Pakistan Lookup (/pak) 🇵🇰\n\n🔎 Query: \`${escapeMd(query)}\`\n\n\`\`\`json\n${JSON.stringify(result.data, null, 2)}\n\`\`\`\n\n• 1 credit deducted from your balance`;
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'No data found'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in pak command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching /pak info.\n💳 1 credit refunded');
+  }
+});
+
+// ===============================
+// IFSC (TEXT, NOT JSON)
+// ===============================
+bot.command('ifsc', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const ifsc = (ctx.match || '').toString().trim();
+  if (!ifsc) {
+    await sendFormattedMessage(ctx, '🏦 Usage: /ifsc <IFSC>\n\nExample: /ifsc SBIN0001234');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🏦 Fetching IFSC details...');
+
+  try {
+    const result = await getIfscInfo(ifsc);
+    if (result.success && result.data) {
+      const d = result.data || {};
+      // Try common keys; fallback to printing whatever exists as text
+      const lines = [];
+      const push = (label, val) => {
+        if (val !== undefined && val !== null && String(val).trim() !== '') {
+          lines.push(`• *${label}:* ${escapeMd(String(val))}`);
+        }
+      };
+
+      push('IFSC', d.ifsc || d.IFSC || ifsc);
+      push('Bank', d.bank || d.BANK);
+      push('Branch', d.branch || d.BRANCH);
+      push('Address', d.address || d.ADDRESS);
+      push('City', d.city || d.CITY);
+      push('District', d.district || d.DISTRICT);
+      push('State', d.state || d.STATE);
+      push('MICR', d.micr || d.MICR);
+      push('Contact', d.contact || d.CONTACT);
+      push('UPI', d.upi || d.UPI);
+
+      const response =
+        `🏦 *IFSC Details* 🏦\n\n` +
+        `🔎 Query: \`${escapeMd(ifsc)}\`\n\n` +
+        (lines.length ? lines.join('\n') : `• Result received, but fields are unknown.\n• Please check:\n${escapeMd(JSON.stringify(d))}`) +
+        `\n\n• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to fetch IFSC info'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in ifsc command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching IFSC info.\n💳 1 credit refunded');
+  }
+});
+
+// ===============================
+// YOUTUBE THUMBNAIL (DIRECT IMAGE)
+// ===============================
+bot.command('thumb', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const ytUrl = (ctx.match || '').toString().trim();
+  if (!ytUrl) {
+    await sendFormattedMessage(ctx, '🖼️ Usage: /thumb <YouTube link>\n\nExample: /thumb https://youtu.be/8of5w7RgcTc');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🖼️ Fetching thumbnail...');
+
+  try {
+    await sendYouTubeThumb(ctx, ytUrl);
+    user.totalQueries++;
+  } catch (error) {
+    console.error('Error in thumb command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ Failed to fetch thumbnail.\n💳 1 credit refunded');
+  }
+});
+
 
 bot.command('ig', async (ctx) => {
   const user = getOrCreateUser(ctx);
@@ -1842,6 +2171,48 @@ bot.command('credits', async (ctx) => {
   await sendFormattedMessage(ctx, response);
 });
 
+
+// ===============================
+// SPLEXX IMAGE GENERATOR (DIRECT IMAGE)
+// ===============================
+bot.command('imggen', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const promptText = (ctx.match || '').toString().trim();
+  if (!promptText) {
+    await sendFormattedMessage(ctx, '🖼️ Usage: /imggen <text>\n\nExample: /imggen A cute girl with dog');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🖼️ Generating image...');
+
+  try {
+    const result = await sendSplexxImage(ctx, promptText);
+    if (result && result.success) {
+      user.totalQueries++;
+      // Photo already sent
+      return;
+    }
+    // refund on failure
+    user.credits += 1;
+    await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to generate image'}\n💳 1 credit refunded`);
+  } catch (error) {
+    console.error('Error in imggen command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while generating the image.\n💳 1 credit refunded');
+  }
+});
+
+
 // Help command
 bot.command('help', async (ctx) => {
   const helpMessage = `📖 Premium OSINT Bot - Complete Guide 📖
@@ -1857,6 +2228,10 @@ bot.command('help', async (ctx) => {
 • /num <number> - International phone lookup
 • /basicnum <number> - Basic number information
 • /paknum <number> - Pakistani government number and CNIC lookup
+• /pak <query> - Pakistan lookup (rehu)
+• /pincode <pincode> - India pincode lookup
+• /postoffice <name> - India post office search
+• /ifsc <ifsc> - IFSC bank details
 • /ig <username> - Instagram profile intelligence
 
 🚗 Vehicle & Gaming:
@@ -1893,6 +2268,12 @@ bot.command('help', async (ctx) => {
 • /num 9389482769
 • /basicnum 919087654321
 • /paknum 03005854962
+• /pak 2150952917167
+• /pincode 400001
+• /postoffice Delhi
+• /ifsc SBIN0001234
+• /thumb https://youtu.be/8of5w7RgcTc
+• /imggen A cute girl with dog
 • /ig instagram
 • /dl https://www.instagram.com/reel/DSSvFDgjU3s/
 • /snap https://snapchat.com/t/H2D8zTxt
