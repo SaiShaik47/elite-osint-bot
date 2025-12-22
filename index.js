@@ -588,6 +588,17 @@ function escapeMd(text = "") {
     .replace(/[_*[\]()~`>#+=|{}.!-]/g, "\\$&");
 }
 
+// Escape HTML to avoid Telegram HTML parse errors
+function escapeHtml(text = "") {
+  return text
+    .toString()
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Fixed TeraBox multi-video downloads handler
 async function handleTeraBox(ctx, url) {
   try {
@@ -1108,7 +1119,7 @@ bot.command('register', async (ctx) => {
   user.isApproved = true;
   user.credits = 25; // Give starting credits
 
-  ctx.reply(
+  await ctx.reply(
     '🎉 Registration successful!\n' +
     '✅ Your account is automatically approved.'
   );
@@ -1126,6 +1137,53 @@ bot.command('register', async (ctx) => {
       `🆔 ${userId}`
     ).catch(() => {});
   });
+
+  // 📢 Auto-log new registrations to @OsintShitUpdates
+  // NOTE: Bot must be an admin in the channel to post messages.
+  try {
+    const u = getOrCreateUser(ctx);
+    const fullNameRaw = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ').trim();
+    const usernameRaw = ctx.from.username ? `@${ctx.from.username}` : 'N/A';
+    const langRaw = ctx.from.language_code || 'N/A';
+    // Phone can only be collected if the user shares contact with the bot
+    const phoneFromContact = ctx.message?.contact?.phone_number || null;
+    if (phoneFromContact) {
+      try { u.phone = phoneFromContact; } catch (_) {}
+    }
+    const phoneRaw = phoneFromContact || (u && u.phone) || 'Not provided';
+
+    // Bio is best-effort via getChat (may fail if bot can't access)
+    let bioRaw = 'N/A';
+    try {
+      const chat = await bot.api.getChat(userId);
+      if (chat && typeof chat.bio === 'string' && chat.bio.trim()) bioRaw = chat.bio.trim();
+    } catch (_) {}
+
+    const now = new Date();
+
+    // Use HTML mode (more stable than Markdown; avoids parse crashes)
+    const channelMsg =
+      `🆕 <b>New Registration</b>\n\n` +
+      `👤 <b>Name:</b> ${escapeHtml(fullNameRaw || 'N/A')}\n` +
+      `🔖 <b>Username:</b> ${escapeHtml(usernameRaw)}\n` +
+      `🆔 <b>User ID:</b> <code>${escapeHtml(String(userId))}</code>\n` +
+      `🌐 <b>Language:</b> ${escapeHtml(langRaw)}
+` +
+      `📞 <b>Phone:</b> ${escapeHtml(String(phoneRaw))}
+` +
+      `📝 <b>Bio:</b> ${escapeHtml(String(bioRaw))}
+` +
+      `🪙 <b>Starting Credits:</b> ${escapeHtml(String((u && typeof u.credits !== 'undefined') ? u.credits : 25))}\n` +
+      `✅ <b>Approved:</b> ${escapeHtml(String((u && u.isApproved) ? 'Yes' : 'No'))}\n` +
+      `📅 <b>Registered At:</b> ${escapeHtml(now.toLocaleString())}\n`;
+
+    await bot.api.sendMessage(CHANNEL_ID, channelMsg, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    });
+  } catch (e) {
+    console.error('[REG LOG CHANNEL ERROR]', e);
+  }
 });
 
 // ===============================
