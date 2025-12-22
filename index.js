@@ -256,6 +256,16 @@ async function getIfscInfo(ifsc) {
 async function sendYouTubeThumb(ctx, ytUrl) {
   const thumbApi = `https://old-studio-thum-down.oldhacker7866.workers.dev/?url=${encodeURIComponent(ytUrl)}`;
 
+  const apiMeta = {
+    ok: false,
+    api: thumbApi,
+    input: ytUrl,
+    status: null,
+    contentType: null,
+    extractedImageUrl: null,
+    note: null,
+  };
+
   // Robust: fetch ourselves, then upload buffer to Telegram.
   const res = await axios.get(thumbApi, {
     timeout: 45000,
@@ -267,10 +277,29 @@ async function sendYouTubeThumb(ctx, ytUrl) {
     }
   });
 
-  const ct = String(res.headers?.['content-type'] || '').toLowerCase();
+  apiMeta.status = res.status;
+  apiMeta.contentType = String(res.headers?.['content-type'] || '').toLowerCase();
+
+  const ct = apiMeta.contentType;
+
+  // Helper: send pretty JSON response (Telegram doesn't truly color JSON; codeblock is the closest)
+  async function sendJsonResponse(extra = {}) {
+    const payload = { ...apiMeta, ...extra };
+    const pretty = JSON.stringify(payload, null, 2);
+    await sendFormattedMessage(
+      ctx,
+      `🎨 *Thumbnail API Response*
+
+\`\`\`json
+${pretty}
+\`\`\``
+    );
+  }
 
   // Case 1: API returns image directly
   if (res.status >= 200 && res.status < 300 && ct.startsWith('image/')) {
+    apiMeta.ok = true;
+    apiMeta.note = "API returned image directly";
     const buf = Buffer.from(res.data);
     await ctx.replyWithPhoto(
       { source: buf },
@@ -278,112 +307,67 @@ async function sendYouTubeThumb(ctx, ytUrl) {
 
 🔗 ${ytUrl}` }
     );
+    await sendJsonResponse();
     return;
   }
 
   // Case 2: API returns JSON (or text) with an image URL inside
   let jsonObj = null;
+  let rawText = null;
   try {
-    const asText = Buffer.from(res.data || '').toString('utf-8');
-    jsonObj = JSON.parse(asText);
+    rawText = Buffer.from(res.data || '').toString('utf-8');
+    jsonObj = JSON.parse(rawText);
   } catch (_) {}
 
   const foundUrl = findFirstUrlDeep(jsonObj);
   if (foundUrl) {
+    apiMeta.ok = true;
+    apiMeta.extractedImageUrl = foundUrl;
+    apiMeta.note = "Extracted image URL from JSON response";
     const imgRes = await axios.get(foundUrl, {
       timeout: 45000,
       responseType: 'arraybuffer',
+      validateStatus: () => true,
       headers: { 'accept': 'image/*,*/*;q=0.8', 'user-agent': 'Mozilla/5.0' }
     });
-    const buf = Buffer.from(imgRes.data);
-    await ctx.replyWithPhoto(
-      { source: buf },
-      { caption: `🖼️ YouTube Thumbnail
+
+    const imgCt = String(imgRes.headers?.['content-type'] || '').toLowerCase();
+    if (imgRes.status >= 200 && imgRes.status < 300 && imgCt.startsWith('image/')) {
+      const buf = Buffer.from(imgRes.data);
+      await ctx.replyWithPhoto(
+        { source: buf },
+        { caption: `🖼️ YouTube Thumbnail
 
 🔗 ${ytUrl}` }
-    );
-    return;
+      );
+      await sendJsonResponse({ apiJson: jsonObj ?? undefined });
+      return;
+    }
+
+    // If image fetch failed, still show response
+    apiMeta.ok = false;
+    apiMeta.note = `Found image URL but failed to download image (status=${imgRes.status}, ct=${imgCt})`;
+    await sendJsonResponse({ apiJson: jsonObj ?? undefined });
+    throw new Error(apiMeta.note);
   }
 
   // Case 3: last resort – try letting Telegram fetch by URL (sometimes works)
   try {
+    apiMeta.ok = true;
+    apiMeta.note = "Telegram fetched image by URL (fallback)";
     await ctx.replyWithPhoto(thumbApi, { caption: `🖼️ YouTube Thumbnail
 
 🔗 ${ytUrl}` });
+    await sendJsonResponse({ apiText: rawText ?? undefined });
     return;
   } catch (_) {}
 
-  throw new Error(`Thumbnail API did not return a usable image. status=${res.status} ct=${ct}`);
+  apiMeta.ok = false;
+  apiMeta.note = `Thumbnail API did not return a usable image. status=${res.status} ct=${ct}`;
+  await sendJsonResponse({ apiText: rawText ?? undefined });
+  throw new Error(apiMeta.note);
 }
 
-
-/**
- * SPLEXX Image Generator (send direct image)
- * API: https://splexx-api-img.vercel.app/api/imggen?text=...&key=SPLEXXO
- */
-async function sendSplexxImage(ctx, promptText) {
-  const apiUrl = `https://splexx-api-img.vercel.app/api/imggen?text=${encodeURIComponent(promptText)}&key=SPLEXXO`;
-
-  try {
-    const res = await axios.get(apiUrl, {
-      timeout: 60000,
-      responseType: 'arraybuffer',
-      validateStatus: () => true,
-      headers: {
-        'accept': 'image/*,application/json;q=0.9,*/*;q=0.8',
-        'user-agent': 'Mozilla/5.0'
-      }
-    });
-
-    const ct = String(res.headers?.['content-type'] || '').toLowerCase();
-
-    // If image returned directly
-    if (res.status >= 200 && res.status < 300 && ct.startsWith('image/')) {
-      const buf = Buffer.from(res.data);
-      await ctx.replyWithPhoto(
-        { source: buf },
-        { caption: `🖼️ Image Generated
-
-✍️ Prompt: ${promptText}` }
-      );
-      return { success: true };
-    }
-
-    // If JSON/text returned, try to extract an URL then fetch it
-    let jsonObj = null;
-    try {
-      const asText = Buffer.from(res.data || '').toString('utf-8');
-      jsonObj = JSON.parse(asText);
-    } catch (_) {}
-
-    const foundUrl = findFirstUrlDeep(jsonObj);
-    if (foundUrl) {
-      const imgRes = await axios.get(foundUrl, {
-        timeout: 60000,
-        responseType: 'arraybuffer',
-        headers: { 'accept': 'image/*,*/*;q=0.8', 'user-agent': 'Mozilla/5.0' }
-      });
-      const imgCt = String(imgRes.headers?.['content-type'] || '').toLowerCase();
-      if (!imgCt.startsWith('image/')) {
-        return { success: false, error: 'API returned a non-image response' };
-      }
-      const buf = Buffer.from(imgRes.data);
-      await ctx.replyWithPhoto(
-        { source: buf },
-        { caption: `🖼️ Image Generated
-
-✍️ Prompt: ${promptText}` }
-      );
-      return { success: true };
-    }
-
-    // If nothing worked
-    return { success: false, error: `API did not return an image (status ${res.status})` };
-  } catch (error) {
-    console.error('sendSplexxImage error:', error);
-    return { success: false, error: 'Failed to generate image' };
-  }
-}
 
 
 
@@ -929,12 +913,10 @@ bot.use((ctx, next) => {
 // ===============================
 
 function mainMenuKeyboard(userId) {
+  // 2 buttons per row + last Help button (as requested)
   return new InlineKeyboard()
-    .text("🔍 OSINT Tools", "menu_osint").row()
-    .text("📥 Downloaders", "menu_dl").row()
-    .text("🇮🇳 India Tools", "menu_india").row()
-    .text("🏦 Banking", "menu_bank").row()
-    .text("👤 Account", "menu_account").row()
+    .text("🔍 OSINT", "menu_osint").text("📥 Downloaders", "menu_dl").row()
+    .text("🇮🇳 India", "menu_india").text("🏦 Banking", "menu_bank").row()
     .text("ℹ️ Help", "menu_help");
 }
 
@@ -972,25 +954,53 @@ async function safeEditOrReply(ctx, text, keyboard) {
 bot.command('start', async (ctx) => {
   const user = getOrCreateUser(ctx);
 
-  // Not approved -> keep message short (start used a lot)
+  // Fetch bot info (safe)
+  let botMe = null;
+  try { botMe = await ctx.api.getMe(); } catch (_) {}
+
+  const botName = botMe?.first_name || "OSINT Bot";
+  const botUser = botMe?.username ? `@${botMe.username}` : "";
+  const u = ctx.from || {};
+  const displayName = [u.first_name, u.last_name].filter(Boolean).join(" ") || "User";
+  const uname = u.username ? `@${u.username}` : "—";
+  const lang = u.language_code || "—";
+
+  // Not approved -> short welcome + verify UI
   if (!user.isApproved) {
-    const msg = `🚀 *Welcome to Premium OSINT Bot*
+    const msg =
+`👋 *Welcome, ${escapeMd(displayName)}!*
+
+🤖 *${escapeMd(botName)}* ${botUser ? `(${escapeMd(botUser)})` : ""}
 
 To use the bot:
 1) Join our updates channel
 2) Tap *Verify Membership*
-3) Use /register to request access`;
+3) Run /register`;
 
     const keyboard = new InlineKeyboard()
-      .url("📢 Join Updates Channel", CHANNEL_URL)
+      .url("📢 Join Updates Channel", CHANNEL_URL).row()
       .text("✅ Verify Membership", `verify_${ctx.from.id}`);
 
     return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: keyboard });
   }
 
-  const msg = `✅ *Welcome back, ${user.firstName || "User"}!*
+  const msg =
+`✨ *Welcome back, ${escapeMd(displayName)}!*
 
-Choose a category below:`;
+👤 *Your Info*
+• ID: \`${escapeMd(String(u.id))}\`
+• Username: ${escapeMd(uname)}
+• Language: \`${escapeMd(String(lang))}\`
+
+🤖 *Bot Info*
+• Name: *${escapeMd(botName)}*
+• Status: ✅ Online
+• Version: \`v4-menu\`
+
+💳 *Credits:* *${user.credits}* 🪙
+${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
+
+Choose a category:`;
 
   return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: mainMenuKeyboard(ctx.from.id) });
 });
@@ -998,12 +1008,17 @@ Choose a category below:`;
 // Menu: Home
 bot.callbackQuery("menu_home", async (ctx) => {
   const user = getOrCreateUser(ctx);
-  const msg = `✅ *Main Menu*
+  const u = ctx.from || {};
+  const name = [u.first_name, u.last_name].filter(Boolean).join(" ") || "User";
 
+  const msg =
+`🏠 *Main Menu*
+
+👋 Hi, *${escapeMd(name)}*
 💳 Credits: *${user.credits}* 🪙
 ${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
 
-Choose a category:`;
+Pick a category:`;
   return safeEditOrReply(ctx, msg, mainMenuKeyboard(ctx.from.id));
 });
 
@@ -1034,8 +1049,7 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /pin <url> — Pinterest downloader
 • /fb <url> — Facebook downloader
 • /terabox <url> — TeraBox downloader
-• /thumb <url> — YouTube thumbnail (image)
-• /imggen <text> — AI image generator (sends image)`;
+• /thumb <url> — YouTube thumbnail (image)`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
@@ -1056,20 +1070,6 @@ bot.callbackQuery("menu_bank", async (ctx) => {
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
-// Menu: Account
-bot.callbackQuery("menu_account", async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  const msg = `👤 *Your Account*
-
-• /credits — Check credits
-• /checkstatus — Registration status
-• /sync — Sync registration (if approved)
-• /stats — Bot statistics
-
-💳 Credits: *${user.credits}* 🪙
-${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}`;
-  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
-});
 
 // Menu: Help
 bot.callbackQuery("menu_help", async (ctx) => {
@@ -2325,43 +2325,6 @@ bot.command('credits', async (ctx) => {
 // ===============================
 // SPLEXX IMAGE GENERATOR (DIRECT IMAGE)
 // ===============================
-bot.command('imggen', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
-  }
-
-  if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
-    return;
-  }
-
-  const promptText = (ctx.match || '').toString().trim();
-  if (!promptText) {
-    await sendFormattedMessage(ctx, '🖼️ Usage: /imggen <text>\n\nExample: /imggen A cute girl with dog');
-    return;
-  }
-
-  await sendFormattedMessage(ctx, '🖼️ Generating image...');
-
-  try {
-    const result = await sendSplexxImage(ctx, promptText);
-    if (result && result.success) {
-      user.totalQueries++;
-      // Photo already sent
-      return;
-    }
-    // refund on failure
-    user.credits += 1;
-    await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to generate image'}\n💳 1 credit refunded`);
-  } catch (error) {
-    console.error('Error in imggen command:', error);
-    user.credits += 1;
-    await sendFormattedMessage(ctx, '❌ An error occurred while generating the image.\n💳 1 credit refunded');
-  }
-});
-
 
 // Help command
 bot.command('help', async (ctx) => {
@@ -2423,7 +2386,6 @@ bot.command('help', async (ctx) => {
 • /postoffice Delhi
 • /ifsc SBIN0001234
 • /thumb https://youtu.be/8of5w7RgcTc
-• /imggen A cute girl with dog
 • /ig instagram
 • /dl https://www.instagram.com/reel/DSSvFDgjU3s/
 • /snap https://snapchat.com/t/H2D8zTxt
