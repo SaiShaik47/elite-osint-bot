@@ -913,53 +913,15 @@ bot.use((ctx, next) => {
 // ===============================
 
 function mainMenuKeyboard(userId) {
-  // Premium layout: 2 top, 2 bottom, last Help (as requested)
+  // 2 buttons per row + last Help button (as requested)
   return new InlineKeyboard()
-    .text("🕵️ OSINT", "menu_osint").text("📥 Download", "menu_dl").row()
-    .text("🇮🇳 India Info", "menu_india").text("🏦 Banking", "menu_bank").row()
-    .text("❓ Help", "menu_help");
+    .text("🔍 OSINT", "menu_osint").text("📥 Downloaders", "menu_dl").row()
+    .text("🇮🇳 India", "menu_india").text("🏦 Banking", "menu_bank").row()
+    .text("ℹ️ Help", "menu_help");
 }
 
 function backToMenuKeyboard() {
   return new InlineKeyboard().text("⬅️ Back", "menu_home");
-}
-
-// Premium submenu keyboards (emoji-rich)
-function osintMenuKeyboard() {
-  return new InlineKeyboard()
-    .text("📸 YT Thumbnail", "cmd_thumb").row()
-    .text("📱 Pakistan Lookup", "cmd_pak").row()
-    .text("⬅️ Back", "menu_home");
-}
-
-function dlMenuKeyboard() {
-  return new InlineKeyboard()
-    .text("🎞️ Universal /dl", "cmd_dl").row()
-    .text("📸 /thumb", "cmd_thumb").row()
-    .text("⬅️ Back", "menu_home");
-}
-
-function indiaMenuKeyboard() {
-  return new InlineKeyboard()
-    .text("📮 Pincode", "cmd_pincode").text("🏤 Post Office", "cmd_postoffice").row()
-    .text("⬅️ Back", "menu_home");
-}
-
-function bankMenuKeyboard() {
-  return new InlineKeyboard()
-    .text("🏧 IFSC Details", "cmd_ifsc").row()
-    .text("⬅️ Back", "menu_home");
-}
-
-function helpMenuKeyboard() {
-  return new InlineKeyboard()
-    .text("📘 How to Use", "help_how").text("💬 Contact Admin", "help_admin").row()
-    .text("⬅️ Back", "menu_home");
-}
-
-function cmdBackKeyboard(section) {
-  // section: menu_osint/menu_dl/menu_india/menu_bank/menu_help
-  return new InlineKeyboard().text("⬅️ Back", section);
 }
 
 async function safeEditOrReply(ctx, text, keyboard) {
@@ -1023,22 +985,22 @@ To use the bot:
   }
 
   const msg =
-`✨ *Welcome, ${escapeMd(displayName)}!*
+`✨ *Welcome back, ${escapeMd(displayName)}!*
 
-┏━ 👤 *User*
-┣ 🆔 ID: \`${escapeMd(String(u.id))}\`
-┣ 🧷 Username: ${escapeMd(uname)}
-┣ 🌐 Lang: \`${escapeMd(String(lang))}\`
-┗━ ⭐ Plan: ${user.isPremium ? "💎 Premium" : "🔓 Free"}
+👤 *Your Info*
+• ID: \`${escapeMd(String(u.id))}\`
+• Username: ${escapeMd(uname)}
+• Language: \`${escapeMd(String(lang))}\`
 
-┏━ 🤖 *Bot*
-┣ 📡 Status: ✅ Online
-┣ 🛡️ Mode: ${maintenanceMode ? "⚠️ Maintenance" : "🟢 Live"}
-┗━ 🧾 Commands: tap buttons below
+🤖 *Bot Info*
+• Name: *${escapeMd(botName)}*
+• Status: ✅ Online
+• Version: \`v4-menu\`
 
 💳 *Credits:* *${user.credits}* 🪙
+${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
 
-Select a category ⬇️`;
+Choose a category:`;
 
   return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: mainMenuKeyboard(ctx.from.id) });
 });
@@ -1052,190 +1014,73 @@ bot.callbackQuery("menu_home", async (ctx) => {
   const msg =
 `🏠 *Main Menu*
 
-👤 *${escapeMd(name)}*
+👋 Hi, *${escapeMd(name)}*
 💳 Credits: *${user.credits}* 🪙
-⭐ Plan: ${user.isPremium ? "💎 Premium" : "🔓 Free"}
+${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
 
-Choose a category ⬇️`;
+Pick a category:`;
   return safeEditOrReply(ctx, msg, mainMenuKeyboard(ctx.from.id));
 });
 
 // Menu: OSINT
 bot.callbackQuery("menu_osint", async (ctx) => {
-  const msg =
-`🕵️ *OSINT Suite*
-━━━━━━━━━━━━━━
-Tap a tool below 👇
+  const msg = `🔍 *OSINT Tools*
 
-✨ *Popular*
-• 📸 /thumb <yt_url>
-• 📱 /pak <query>
-
-🧠 *More OSINT*
-• 🌐 /ip <ip>
-• 📧 /email <email>
-• 📞 /num <number>
-• 🪪 /basicnum <number>
-• 🧾 /paknum <number>  (separate)
-• 📷 /ig <username>
-• 💳 /bin <bin>
-• 🚗 /vehicle <no>
-• 🎮 /ff <uid>`;
-  return safeEditOrReply(ctx, msg, osintMenuKeyboard());
+• /ip <address> — IP intelligence
+• /email <email> — Email validation
+• /num <number> — Phone number lookup
+• /basicnum <number> — Basic number info
+• /paknum <number> — Pakistani govt lookup
+• /pak <query> — Pakistan lookup (rehu)
+• /ig <username> — Instagram intelligence
+• /bin <number> — BIN lookup
+• /vehicle <number> — Vehicle details
+• /ff <uid> — Free Fire stats`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
 // Menu: Downloaders
 bot.callbackQuery("menu_dl", async (ctx) => {
-  const msg =
-`📥 *Download & Media*
-━━━━━━━━━━━━━━
-Tap a shortcut 👇
+  const msg = `📥 *Downloaders & Media*
 
-• 🎞️ /dl <url> — Universal
-• 👻 /snap <url>
-• 📷 /insta <url>
-• 📌 /pin <url>
-• 📘 /fb <url>
-• 📦 /terabox <url>
-• 📸 /thumb <yt_url> — Thumbnail`;
-  return safeEditOrReply(ctx, msg, dlMenuKeyboard());
+• /dl <url> — Universal downloader
+• /snap <url> — Snapchat downloader
+• /insta <url> — Instagram downloader
+• /pin <url> — Pinterest downloader
+• /fb <url> — Facebook downloader
+• /terabox <url> — TeraBox downloader
+• /thumb <url> — YouTube thumbnail (image)`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
 // Menu: India
 bot.callbackQuery("menu_india", async (ctx) => {
-  const msg =
-`🇮🇳 *India Info Tools*
-━━━━━━━━━━━━━━
-Postal services 👇
+  const msg = `🇮🇳 *India Tools*
 
-• 📮 /pincode <pin>
-• 🏤 /postoffice <name>`;
-  return safeEditOrReply(ctx, msg, indiaMenuKeyboard());
+• /pincode <pincode> — Pincode lookup
+• /postoffice <name> — Post Office search`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
 // Menu: Banking
 bot.callbackQuery("menu_bank", async (ctx) => {
-  const msg =
-`🏦 *Banking Tools*
-━━━━━━━━━━━━━━
-• 🏧 /ifsc <ifsc> — Bank details (clean text)`;
-  return safeEditOrReply(ctx, msg, bankMenuKeyboard());
+  const msg = `🏦 *Banking*
+
+• /ifsc <ifsc> — IFSC bank details (text output)`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
 
 // Menu: Help
 bot.callbackQuery("menu_help", async (ctx) => {
-  const msg =
-`❓ *Help & Guide*
-━━━━━━━━━━━━━━
-• Use /start to open menu anytime
-• If buttons stuck: tap again
-• If locked: join channel & press ✅ Verify
+  const msg = `ℹ️ *Help*
 
-Need examples? Tap below 👇`;
-  return safeEditOrReply(ctx, msg, helpMenuKeyboard());
-});
+• Use /start to open the menu anytime
+• If buttons freeze, tap again (Telegram bug)
+• If you get "join channel" lock, join and press Verify
 
-// ===============================
-// PREMIUM COMMAND SHORTCUT PAGES (CALLBACK)
-// ===============================
-bot.callbackQuery("cmd_thumb", async (ctx) => {
-  const msg =
-`📸 *YouTube Thumbnail*
-━━━━━━━━━━━━━━
-Send:
-\`/thumb <youtube_link>\`
-
-Example:
-\`/thumb https://youtu.be/8of5w7RgcTc\`
-
-✅ Sends image in chat + API JSON response`;
-  return safeEditOrReply(ctx, msg, cmdBackKeyboard("menu_osint"));
-});
-
-bot.callbackQuery("cmd_pak", async (ctx) => {
-  const msg =
-`📱 *Pakistan Lookup (rehu)*
-━━━━━━━━━━━━━━
-Send:
-\`/pak <query>\`
-
-Example:
-\`/pak 2150952917167\`
-
-ℹ️ This is *separate* from /paknum`;
-  return safeEditOrReply(ctx, msg, cmdBackKeyboard("menu_osint"));
-});
-
-bot.callbackQuery("cmd_pincode", async (ctx) => {
-  const msg =
-`📮 *Pincode Lookup*
-━━━━━━━━━━━━━━
-Send:
-\`/pincode <pin>\`
-
-Example:
-\`/pincode 400001\``;
-  return safeEditOrReply(ctx, msg, cmdBackKeyboard("menu_india"));
-});
-
-bot.callbackQuery("cmd_postoffice", async (ctx) => {
-  const msg =
-`🏤 *Post Office Search*
-━━━━━━━━━━━━━━
-Send:
-\`/postoffice <name>\`
-
-Example:
-\`/postoffice Delhi\``;
-  return safeEditOrReply(ctx, msg, cmdBackKeyboard("menu_india"));
-});
-
-bot.callbackQuery("cmd_ifsc", async (ctx) => {
-  const msg =
-`🏧 *IFSC Details*
-━━━━━━━━━━━━━━
-Send:
-\`/ifsc <ifsc>\`
-
-Example:
-\`/ifsc SBIN0001234\``;
-  return safeEditOrReply(ctx, msg, cmdBackKeyboard("menu_bank"));
-});
-
-bot.callbackQuery("cmd_dl", async (ctx) => {
-  const msg =
-`🎞️ *Universal Downloader*
-━━━━━━━━━━━━━━
-Send:
-\`/dl <url>\`
-
-Example:
-\`/dl https://instagram.com/reel/xxxx\``;
-  return safeEditOrReply(ctx, msg, cmdBackKeyboard("menu_dl"));
-});
-
-bot.callbackQuery("help_how", async (ctx) => {
-  const msg =
-`📘 *How to Use*
-━━━━━━━━━━━━━━
-1) Join channel (first time)
-2) Press ✅ Verify Membership
-3) Use commands from menus
-
-💡 Tip: You can copy-paste command examples.`;
-  return safeEditOrReply(ctx, msg, cmdBackKeyboard("menu_help"));
-});
-
-bot.callbackQuery("help_admin", async (ctx) => {
-  const msg =
-`💬 *Contact Admin*
-━━━━━━━━━━━━━━
-Send your issue + screenshot to admin.
-
-👑 Admin ID:
-\`${escapeMd(String(adminId))}\``;
-  return safeEditOrReply(ctx, msg, cmdBackKeyboard("menu_help"));
+⚠️ *Educational purpose only*`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
 // Registration command - Fixed to check Telegram API directly
