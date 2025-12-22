@@ -254,10 +254,66 @@ async function getIfscInfo(ifsc) {
 // YOUTUBE THUMBNAIL (SEND AS IMAGE)
 // ===============================
 async function sendYouTubeThumb(ctx, ytUrl) {
-  // Worker returns an image for the provided youtube URL
   const thumbApi = `https://old-studio-thum-down.oldhacker7866.workers.dev/?url=${encodeURIComponent(ytUrl)}`;
-  // Telegram can fetch photo by URL directly if it's publicly accessible (https)
-  await ctx.replyWithPhoto(thumbApi, { caption: `🖼️ YouTube Thumbnail\n\n🔗 ${ytUrl}` });
+
+  // Robust: fetch ourselves, then upload buffer to Telegram.
+  const res = await axios.get(thumbApi, {
+    timeout: 45000,
+    responseType: 'arraybuffer',
+    validateStatus: () => true,
+    headers: {
+      'accept': 'image/*,application/json;q=0.9,*/*;q=0.8',
+      'user-agent': 'Mozilla/5.0'
+    }
+  });
+
+  const ct = String(res.headers?.['content-type'] || '').toLowerCase();
+
+  // Case 1: API returns image directly
+  if (res.status >= 200 && res.status < 300 && ct.startsWith('image/')) {
+    const buf = Buffer.from(res.data);
+    await ctx.replyWithPhoto(
+      { source: buf },
+      { caption: `🖼️ YouTube Thumbnail
+
+🔗 ${ytUrl}` }
+    );
+    return;
+  }
+
+  // Case 2: API returns JSON (or text) with an image URL inside
+  let jsonObj = null;
+  try {
+    const asText = Buffer.from(res.data || '').toString('utf-8');
+    jsonObj = JSON.parse(asText);
+  } catch (_) {}
+
+  const foundUrl = findFirstUrlDeep(jsonObj);
+  if (foundUrl) {
+    const imgRes = await axios.get(foundUrl, {
+      timeout: 45000,
+      responseType: 'arraybuffer',
+      headers: { 'accept': 'image/*,*/*;q=0.8', 'user-agent': 'Mozilla/5.0' }
+    });
+    const buf = Buffer.from(imgRes.data);
+    await ctx.replyWithPhoto(
+      { source: buf },
+      { caption: `🖼️ YouTube Thumbnail
+
+🔗 ${ytUrl}` }
+    );
+    return;
+  }
+
+  // Case 3: last resort – try letting Telegram fetch by URL (sometimes works)
+  try {
+    await ctx.replyWithPhoto(thumbApi, { caption: `🖼️ YouTube Thumbnail
+
+🔗 ${ytUrl}` });
+    return;
+  } catch (_) {}
+
+  throw new Error(`Thumbnail API did not return a usable image. status=${res.status} ct=${ct}`);
 }
 
 
@@ -269,22 +325,31 @@ async function sendSplexxImage(ctx, promptText) {
   const apiUrl = `https://splexx-api-img.vercel.app/api/imggen?text=${encodeURIComponent(promptText)}&key=SPLEXXO`;
 
   try {
-    // First try: treat response as raw image
-    const res = await axios.get(apiUrl, { timeout: 45000, responseType: 'arraybuffer', validateStatus: () => true });
-    const ct = (res.headers && (res.headers['content-type'] || res.headers['Content-Type']))
-      ? String(res.headers['content-type'] || res.headers['Content-Type']).toLowerCase()
-      : '';
+    const res = await axios.get(apiUrl, {
+      timeout: 60000,
+      responseType: 'arraybuffer',
+      validateStatus: () => true,
+      headers: {
+        'accept': 'image/*,application/json;q=0.9,*/*;q=0.8',
+        'user-agent': 'Mozilla/5.0'
+      }
+    });
 
+    const ct = String(res.headers?.['content-type'] || '').toLowerCase();
+
+    // If image returned directly
     if (res.status >= 200 && res.status < 300 && ct.startsWith('image/')) {
       const buf = Buffer.from(res.data);
       await ctx.replyWithPhoto(
         { source: buf },
-        { caption: `🖼️ Image Generated\n\n✍️ Prompt: ${promptText}` }
+        { caption: `🖼️ Image Generated
+
+✍️ Prompt: ${promptText}` }
       );
       return { success: true };
     }
 
-    // If not an image, try parsing JSON to find an URL
+    // If JSON/text returned, try to extract an URL then fetch it
     let jsonObj = null;
     try {
       const asText = Buffer.from(res.data || '').toString('utf-8');
@@ -293,18 +358,27 @@ async function sendSplexxImage(ctx, promptText) {
 
     const foundUrl = findFirstUrlDeep(jsonObj);
     if (foundUrl) {
-      const imgRes = await axios.get(foundUrl, { timeout: 45000, responseType: 'arraybuffer' });
+      const imgRes = await axios.get(foundUrl, {
+        timeout: 60000,
+        responseType: 'arraybuffer',
+        headers: { 'accept': 'image/*,*/*;q=0.8', 'user-agent': 'Mozilla/5.0' }
+      });
+      const imgCt = String(imgRes.headers?.['content-type'] || '').toLowerCase();
+      if (!imgCt.startsWith('image/')) {
+        return { success: false, error: 'API returned a non-image response' };
+      }
       const buf = Buffer.from(imgRes.data);
       await ctx.replyWithPhoto(
         { source: buf },
-        { caption: `🖼️ Image Generated\n\n✍️ Prompt: ${promptText}` }
+        { caption: `🖼️ Image Generated
+
+✍️ Prompt: ${promptText}` }
       );
       return { success: true };
     }
 
-    // Last fallback: let Telegram fetch by URL
-    await ctx.replyWithPhoto(apiUrl, { caption: `🖼️ Image Generated\n\n✍️ Prompt: ${promptText}` });
-    return { success: true };
+    // If nothing worked
+    return { success: false, error: `API did not return an image (status ${res.status})` };
   } catch (error) {
     console.error('sendSplexxImage error:', error);
     return { success: false, error: 'Failed to generate image' };
@@ -792,6 +866,11 @@ bot.use(async (ctx, next) => {
   if (ctx.callbackQuery?.data?.startsWith('verify_')) {
     return next();
   }
+
+  // Allow menu callbacks without verification (prevents users getting stuck after restart)
+  if (ctx.callbackQuery?.data?.startsWith('menu_')) {
+    return next();
+  }
   
   // Allow /start command without verification
   if (ctx.message?.text === '/start') {
@@ -846,91 +925,162 @@ bot.use((ctx, next) => {
 });
 
 // ===============================
-// START COMMAND
+// START + MENU (CATEGORIZED CALLBACK BUTTONS)
 // ===============================
+
+function mainMenuKeyboard(userId) {
+  return new InlineKeyboard()
+    .text("🔍 OSINT Tools", "menu_osint").row()
+    .text("📥 Downloaders", "menu_dl").row()
+    .text("🇮🇳 India Tools", "menu_india").row()
+    .text("🏦 Banking", "menu_bank").row()
+    .text("👤 Account", "menu_account").row()
+    .text("ℹ️ Help", "menu_help");
+}
+
+function backToMenuKeyboard() {
+  return new InlineKeyboard().text("⬅️ Back", "menu_home");
+}
+
+async function safeEditOrReply(ctx, text, keyboard) {
+  // Always acknowledge callback to avoid Telegram "loading..."
+  try { await ctx.answerCallbackQuery(); } catch (_) {}
+
+  // Try edit first (works for buttons)
+  try {
+    if (ctx.callbackQuery?.message) {
+      return await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: keyboard });
+    }
+  } catch (e) {
+    // Common: "message is not modified" or can't edit. We'll fall back to reply.
+  }
+
+  // Fallback: send a new message
+  try {
+    return await ctx.reply(text, { parse_mode: "Markdown", reply_markup: keyboard });
+  } catch (error) {
+    // Last fallback: plain text
+    const plainText = text
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/`(.*?)`/g, '$1')
+      .replace(/```(.*?)```/gs, '$1');
+    return await ctx.reply(plainText, { reply_markup: keyboard });
+  }
+}
+
 bot.command('start', async (ctx) => {
   const user = getOrCreateUser(ctx);
-  
+
+  // Not approved -> keep message short (start used a lot)
   if (!user.isApproved) {
-    const welcomeMessage = `🚀 Welcome to Premium OSINT Bot 🚀
+    const msg = `🚀 *Welcome to Premium OSINT Bot*
 
-✨ Your Ultimate Open Source Intelligence Assistant ✨
+To use the bot:
+1) Join our updates channel
+2) Tap *Verify Membership*
+3) Use /register to request access`;
 
-📋 Registration Required 📋
-
-Your account is pending approval by our admin team. 
-
-🔹 Join our channel to get started
-🔹 Click "Verify Membership" after joining
-🔹 Then use /register to submit your registration request
-🔹 You'll be notified once approved
-🔹 Premium features will be available after approval
-
-⚡ Powered by Advanced AI Technology ⚡
-
-🛡️ Educational Purpose Only - Use Responsibly 🛡️`;
-
-    // Create inline keyboard with join and verify buttons
     const keyboard = new InlineKeyboard()
       .url("📢 Join Updates Channel", CHANNEL_URL)
       .text("✅ Verify Membership", `verify_${ctx.from.id}`);
 
-    await ctx.reply(welcomeMessage, { reply_markup: keyboard });
-    return;
+    return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: keyboard });
   }
 
-  const welcomeMessage = `🚀 Welcome to Premium OSINT Bot 🚀
+  const msg = `✅ *Welcome back, ${user.firstName || "User"}!*
 
-✨ Your Ultimate Open Source Intelligence Assistant ✨
+Choose a category below:`;
 
-🔍 Advanced Lookup Tools:
-• /ip <address> - IP intelligence
-• /email <email> - Email validation
-• /num <number> - Phone number lookup
-• /basicnum <number> - Basic number information
-• /paknum <number> - Pakistani government number lookup
-• /pak <query> - Pakistan lookup (rehu)
-• /pincode <pincode> - India pincode lookup
-• /postoffice <name> - India post office search
-• /ifsc <ifsc> - IFSC bank details
-• /ig <username> - Instagram intelligence
-• /bin <number> - BIN lookup
-• /vehicle <number> - Vehicle details
-• /ff <uid> - Free Fire stats
+  return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: mainMenuKeyboard(ctx.from.id) });
+});
 
-📱 Social Media Video Downloaders:
-• /dl <url> - Universal video downloader (auto-detects platform)
-• /snap <url> - Snapchat video downloader
-• /insta <url> - Instagram video downloader
-• /pin <url> - Pinterest video downloader
-• /fb <url> - Facebook video downloader
-• /terabox <url> - TeraBox video downloader
-• /thumb <url> - YouTube thumbnail (image)
-• /thumb <url> - YouTube thumbnail (image)
+// Menu: Home
+bot.callbackQuery("menu_home", async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  const msg = `✅ *Main Menu*
 
-📊 System Commands:
-• /myip - Your IP information
-• /useragent - Browser info
-• /tempmail - Temporary email
-• /stats - Bot statistics
-• /credits - Your credits
-• /checkstatus - Check registration status
-• /sync - Sync registration (if approved but lost access)
-• /help - Show this help message
+💳 Credits: *${user.credits}* 🪙
+${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
 
-💎 Premium Features:
- ${user.isPremium ? '✅ Unlimited queries' : '🔒 Upgrade for unlimited queries'}
- ${user.isPremium ? '✅ Priority API access' : '🔒 Priority processing'}
- ${user.isPremium ? '✅ Advanced tools' : '🔒 Advanced features'}
- ${user.isPremium ? '✅ 24/7 support' : '🔒 Premium support'}
+Choose a category:`;
+  return safeEditOrReply(ctx, msg, mainMenuKeyboard(ctx.from.id));
+});
 
-💳 Your Credits: ${user.credits} 🪙
+// Menu: OSINT
+bot.callbackQuery("menu_osint", async (ctx) => {
+  const msg = `🔍 *OSINT Tools*
 
-⚡ Powered by Advanced AI Technology ⚡
+• /ip <address> — IP intelligence
+• /email <email> — Email validation
+• /num <number> — Phone number lookup
+• /basicnum <number> — Basic number info
+• /paknum <number> — Pakistani govt lookup
+• /pak <query> — Pakistan lookup (rehu)
+• /ig <username> — Instagram intelligence
+• /bin <number> — BIN lookup
+• /vehicle <number> — Vehicle details
+• /ff <uid> — Free Fire stats`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
+});
 
-🛡️ Educational Purpose Only - Use Responsibly 🛡️`;
+// Menu: Downloaders
+bot.callbackQuery("menu_dl", async (ctx) => {
+  const msg = `📥 *Downloaders & Media*
 
-  await sendFormattedMessage(ctx, welcomeMessage);
+• /dl <url> — Universal downloader
+• /snap <url> — Snapchat downloader
+• /insta <url> — Instagram downloader
+• /pin <url> — Pinterest downloader
+• /fb <url> — Facebook downloader
+• /terabox <url> — TeraBox downloader
+• /thumb <url> — YouTube thumbnail (image)
+• /imggen <text> — AI image generator (sends image)`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
+});
+
+// Menu: India
+bot.callbackQuery("menu_india", async (ctx) => {
+  const msg = `🇮🇳 *India Tools*
+
+• /pincode <pincode> — Pincode lookup
+• /postoffice <name> — Post Office search`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
+});
+
+// Menu: Banking
+bot.callbackQuery("menu_bank", async (ctx) => {
+  const msg = `🏦 *Banking*
+
+• /ifsc <ifsc> — IFSC bank details (text output)`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
+});
+
+// Menu: Account
+bot.callbackQuery("menu_account", async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  const msg = `👤 *Your Account*
+
+• /credits — Check credits
+• /checkstatus — Registration status
+• /sync — Sync registration (if approved)
+• /stats — Bot statistics
+
+💳 Credits: *${user.credits}* 🪙
+${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
+});
+
+// Menu: Help
+bot.callbackQuery("menu_help", async (ctx) => {
+  const msg = `ℹ️ *Help*
+
+• Use /start to open the menu anytime
+• If buttons freeze, tap again (Telegram bug)
+• If you get "join channel" lock, join and press Verify
+
+⚠️ *Educational purpose only*`;
+  return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
 // Registration command - Fixed to check Telegram API directly
@@ -4072,4 +4222,3 @@ bot.start().then(() => {
     process.exit(0);
   }
 });
-
