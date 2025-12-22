@@ -205,18 +205,10 @@ async function getFreeFireStats(uid) {
   }
 }
 
-// NEW: Pakistani Government Number Information API
+// NEW: Pakistani Government Number Information API (Updated)
 async function getPakistaniGovtNumberInfo(number) {
   try {
-    const response = await axios.post(
-      'https://govt-pakistan-number-info.vercel.app/search',
-      { query: number.toString() },
-      {
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    const response = await axios.get(`https://rehu-pak-info.vercel.app/api/lookup?query=${number}&pretty=1`);
     
     if (response.data && response.data.success) {
       return { 
@@ -235,6 +227,131 @@ async function getPakistaniGovtNumberInfo(number) {
     return { 
       success: false, 
       error: 'Failed to fetch Pakistani government number information' 
+    };
+  }
+}
+
+// NEW: Postal Pincode Information API
+async function getPincodeInfo(pincode) {
+  try {
+    const response = await axios.get(`https://api.postalpincode.in/pincode/${pincode}`);
+    
+    if (response.data && response.data.length > 0 && response.data[0].Status === 'Success') {
+      return { 
+        success: true, 
+        data: response.data[0]
+      };
+    } else {
+      return { 
+        success: false, 
+        error: 'Invalid pincode or no data found' 
+      };
+    }
+  } catch (error) {
+    console.error('Error calling pincode API:', error);
+    return { 
+      success: false, 
+      error: 'Failed to fetch pincode information' 
+    };
+  }
+}
+
+// NEW: Postal Office Information API
+async function getPostOfficeInfo(officeName) {
+  try {
+    const response = await axios.get(`https://api.postalpincode.in/postoffice/${officeName}`);
+    
+    if (response.data && response.data.length > 0 && response.data[0].Status === 'Success') {
+      return { 
+        success: true, 
+        data: response.data[0]
+      };
+    } else {
+      return { 
+        success: false, 
+        error: 'No post offices found with that name' 
+      };
+    }
+  } catch (error) {
+    console.error('Error calling post office API:', error);
+    return { 
+      success: false, 
+      error: 'Failed to fetch post office information' 
+    };
+  }
+}
+
+// NEW: Image Generation API
+async function generateImage(prompt) {
+  try {
+    const response = await axios.get(`https://splexx-api-img.vercel.app/api/imggen?text=${encodeURIComponent(prompt)}&key=SPLEXXO`);
+    
+    if (response.data && response.data.url) {
+      return { 
+        success: true, 
+        data: response.data
+      };
+    } else {
+      return { 
+        success: false, 
+        error: 'Failed to generate image' 
+      };
+    }
+  } catch (error) {
+    console.error('Error calling image generation API:', error);
+    return { 
+      success: false, 
+      error: 'Failed to generate image' 
+    };
+  }
+}
+
+// NEW: YouTube Thumbnail API
+async function getYoutubeThumbnail(videoUrl) {
+  try {
+    const response = await axios.get(`https://old-studio-thum-down.oldhacker7866.workers.dev/?url=${encodeURIComponent(videoUrl)}`);
+    
+    if (response.data && response.data.thumbnail) {
+      return { 
+        success: true, 
+        data: response.data
+      };
+    } else {
+      return { 
+        success: false, 
+        error: 'Failed to fetch YouTube thumbnail' 
+      };
+    }
+  } catch (error) {
+    console.error('Error calling YouTube thumbnail API:', error);
+    return { 
+      success: false, 
+      error: 'Failed to fetch YouTube thumbnail' 
+    };
+  }
+}
+
+// NEW: IFSC Information API
+async function getIfscInfo(ifsc) {
+  try {
+    const response = await axios.get(`https://ab-ifscinfoapi.vercel.app/info?ifsc=${ifsc}`);
+    
+    if (response.data && response.data.success) {
+      return { 
+        success: true, 
+        data: response.data
+      };
+    } else {
+      return { 
+        success: false, 
+        error: response.data.message || 'Invalid IFSC code' 
+      };
+    }
+  } catch (error) {
+    console.error('Error calling IFSC API:', error);
+    return { 
+      success: false, 
+      error: 'Failed to fetch IFSC information' 
     };
   }
 }
@@ -331,6 +448,26 @@ async function downloadTeraBox(videoUrl) {
   } catch (error) {
     console.error('TeraBox API Error:', error.response?.data || error.message);
     return { success: false, error: 'Failed to fetch download link from TeraBox API.' };
+  }
+}
+
+// NEW: Tobi API Downloader for YouTube and Twitter
+async function downloadWithTobi(videoUrl) {
+  try {
+    const apiUrl = `https://tobi-api-downloader.vercel.app/download?url=${encodeURIComponent(videoUrl)}`;
+    const response = await axios.get(apiUrl, { timeout: 30000 });
+    
+    if (response.data && response.data.success) {
+      return { success: true, data: response.data };
+    } else {
+      return { 
+        success: false, 
+        error: response.data.message || 'Failed to download media' 
+      };
+    }
+  } catch (error) {
+    console.error('Tobi API Error:', error.response?.data || error.message);
+    return { success: false, error: 'Failed to download media using Tobi API.' };
   }
 }
 
@@ -513,6 +650,7 @@ async function handleSingleVideo(ctx, url, platform) {
     else if (platform === 'fb') result = await downloadFacebook(url);
     else if (platform === 'snap') result = await downloadSnapchat(url);
     else if (platform === 'pin') result = await downloadPinterest(url);
+    else if (platform === 'youtube' || platform === 'twitter') result = await downloadWithTobi(url);
     else return sendFormattedMessage(ctx, '❌ Unsupported platform.');
 
     if (!result.success) {
@@ -780,11 +918,14 @@ Your account is pending approval by our admin team.
 • /email <email> - Email validation
 • /num <number> - Phone number lookup
 • /basicnum <number> - Basic number information
-• /paknum <number> - Pakistani government number lookup
+• /pak <number> - Pakistani government number and CNIC lookup
 • /ig <username> - Instagram intelligence
 • /bin <number> - BIN lookup
 • /vehicle <number> - Vehicle details
 • /ff <uid> - Free Fire stats
+• /pincode <code> - Postal pincode information
+• /postoffice <name> - Post office information
+• /ifsc <code> - IFSC code information
 
 📱 Social Media Video Downloaders:
 • /dl <url> - Universal video downloader (auto-detects platform)
@@ -793,6 +934,12 @@ Your account is pending approval by our admin team.
 • /pin <url> - Pinterest video downloader
 • /fb <url> - Facebook video downloader
 • /terabox <url> - TeraBox video downloader
+• /youtube <url> - YouTube video downloader
+• /twitter <url> - Twitter video downloader
+
+🎨 Media Tools:
+• /imggen <prompt> - Generate AI images
+• /thumb <url> - Get YouTube thumbnail
 
 📊 System Commands:
 • /myip - Your IP information
@@ -1038,7 +1185,7 @@ bot.command('dl', async (ctx) => {
 
   const platform = detectPlatform(url);
   if (platform === 'unknown') {
-    return sendFormattedMessage(ctx, '❌ Unsupported platform. Please use a link from Instagram, Facebook, Snapchat, Pinterest, or TeraBox.');
+    return sendFormattedMessage(ctx, '❌ Unsupported platform. Please use a link from Instagram, Facebook, Snapchat, Pinterest, TeraBox, YouTube, or Twitter.');
   }
 
   await sendFormattedMessage(ctx, `⏳ Processing ${platform} video...`);
@@ -1059,6 +1206,70 @@ bot.command('dl', async (ctx) => {
     }
   } catch (error) {
     console.error('Error in dl command:', error);
+    user.credits += 1; // Refund credit on error
+    sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
+  }
+});
+
+// NEW: YouTube video downloader command
+bot.command('youtube', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    return sendFormattedMessage(ctx, '📺 Usage: /youtube <YouTube video URL>');
+  }
+
+  await sendFormattedMessage(ctx, '📺 Downloading YouTube video...');
+
+  try {
+    const success = await handleSingleVideo(ctx, videoUrl, 'youtube');
+    if (success) {
+      user.totalQueries++;
+    } else {
+      user.credits += 1; // Refund credit on failure
+    }
+  } catch (error) {
+    console.error('Error in youtube command:', error);
+    user.credits += 1; // Refund credit on error
+    sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
+  }
+});
+
+// NEW: Twitter video downloader command
+bot.command('twitter', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    return sendFormattedMessage(ctx, '🐦 Usage: /twitter <Twitter video URL>');
+  }
+
+  await sendFormattedMessage(ctx, '🐦 Downloading Twitter video...');
+
+  try {
+    const success = await handleSingleVideo(ctx, videoUrl, 'twitter');
+    if (success) {
+      user.totalQueries++;
+    } else {
+      user.credits += 1; // Refund credit on failure
+    }
+  } catch (error) {
+    console.error('Error in twitter command:', error);
     user.credits += 1; // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
@@ -1412,8 +1623,8 @@ bot.command('basicnum', async (ctx) => {
   }
 });
 
-// UPDATED: Pakistani Government Number Information command
-bot.command('paknum', async (ctx) => {
+// UPDATED: Pakistani Government Number Information command (renamed from /paknum to /pak)
+bot.command('pak', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -1428,7 +1639,7 @@ bot.command('paknum', async (ctx) => {
 
   const number = ctx.match;
   if (!number) {
-    await sendFormattedMessage(ctx, '📱 Usage: /paknum <Pakistani number or CNIC>\n\nExample: /paknum 03005854962\nExample: /paknum 2150952917167');
+    await sendFormattedMessage(ctx, '📱 Usage: /pak <Pakistani number or CNIC>\n\nExample: /pak 03005854962\nExample: /pak 2150952917167');
     return;
   }
 
@@ -1467,10 +1678,246 @@ bot.command('paknum', async (ctx) => {
       await sendFormattedMessage(ctx, `❌ ${result.error || 'No records found for the provided number or CNIC'}\n💳 1 credit refunded`);
     }
   } catch (error) {
-    console.error('Error in paknum command:', error);
+    console.error('Error in pak command:', error);
     // Refund credit on error
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani government number information.\n💳 1 credit refunded');
+  }
+});
+
+// NEW: Postal Pincode Information command
+bot.command('pincode', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const pincode = ctx.match;
+  if (!pincode) {
+    await sendFormattedMessage(ctx, '📍 Usage: /pincode <postal code>\n\nExample: /pincode 400001');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '📍 Fetching postal pincode information...');
+
+  try {
+    const result = await getPincodeInfo(pincode.toString());
+    
+    if (result.success && result.data) {
+      const response = `📍 Postal Pincode Information 📍
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Pincode information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'No records found for the provided pincode'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in pincode command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching pincode information.\n💳 1 credit refunded');
+  }
+});
+
+// NEW: Post Office Information command
+bot.command('postoffice', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const officeName = ctx.match;
+  if (!officeName) {
+    await sendFormattedMessage(ctx, '🏢 Usage: /postoffice <post office name>\n\nExample: /postoffice Delhi');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🏢 Fetching post office information...');
+
+  try {
+    const result = await getPostOfficeInfo(officeName.toString());
+    
+    if (result.success && result.data) {
+      const response = `🏢 Post Office Information 🏢
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Post office information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'No post offices found with that name'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in postoffice command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching post office information.\n💳 1 credit refunded');
+  }
+});
+
+// NEW: IFSC Information command
+bot.command('ifsc', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const ifsc = ctx.match;
+  if (!ifsc) {
+    await sendFormattedMessage(ctx, '🏦 Usage: /ifsc <IFSC code>\n\nExample: /ifsc SBIN0001234');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🏦 Fetching IFSC code information...');
+
+  try {
+    const result = await getIfscInfo(ifsc.toString());
+    
+    if (result.success && result.data) {
+      const response = `🏦 IFSC Code Information 🏦
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 IFSC information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'Invalid IFSC code'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in ifsc command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching IFSC information.\n💳 1 credit refunded');
+  }
+});
+
+// NEW: Image Generation command
+bot.command('imggen', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const prompt = ctx.match;
+  if (!prompt) {
+    await sendFormattedMessage(ctx, '🎨 Usage: /imggen <prompt>\n\nExample: /imggen cute girl with dog');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🎨 Generating image...');
+
+  try {
+    const result = await generateImage(prompt.toString());
+    
+    if (result.success && result.data && result.data.url) {
+      await ctx.replyWithPhoto(result.data.url, {
+        caption: `🎨 Generated Image\n\nPrompt: ${prompt}\n\n💡 1 credit deducted from your balance`
+      });
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to generate image'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in imggen command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while generating the image.\n💳 1 credit refunded');
+  }
+});
+
+// NEW: YouTube Thumbnail command
+bot.command('thumb', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const videoUrl = ctx.match;
+  if (!videoUrl) {
+    await sendFormattedMessage(ctx, '🖼️ Usage: /thumb <YouTube video URL>\n\nExample: /thumb https://youtu.be/8of5w7RgcTc');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🖼️ Fetching YouTube thumbnail...');
+
+  try {
+    const result = await getYoutubeThumbnail(videoUrl.toString());
+    
+    if (result.success && result.data && result.data.thumbnail) {
+      await ctx.replyWithPhoto(result.data.thumbnail, {
+        caption: `🖼️ YouTube Thumbnail\n\nVideo: ${videoUrl}\n\n💡 1 credit deducted from your balance`
+      });
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to fetch YouTube thumbnail'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in thumb command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching the YouTube thumbnail.\n💳 1 credit refunded');
   }
 });
 
@@ -1856,8 +2303,13 @@ bot.command('help', async (ctx) => {
 • /email <email> - Email validation and analysis
 • /num <number> - International phone lookup
 • /basicnum <number> - Basic number information
-• /paknum <number> - Pakistani government number and CNIC lookup
+• /pak <number> - Pakistani government number and CNIC lookup
 • /ig <username> - Instagram profile intelligence
+
+🏦 Financial & Postal:
+• /ifsc <code> - IFSC code information
+• /pincode <code> - Postal pincode information
+• /postoffice <name> - Post office information
 
 🚗 Vehicle & Gaming:
 • /vehicle <number> - Vehicle registration details
@@ -1870,6 +2322,12 @@ bot.command('help', async (ctx) => {
 • /pin <url> - Pinterest video downloader
 • /fb <url> - Facebook video downloader
 • /terabox <url> - TeraBox video downloader
+• /youtube <url> - YouTube video downloader
+• /twitter <url> - Twitter video downloader
+
+🎨 Media Tools:
+• /imggen <prompt> - Generate AI images
+• /thumb <url> - Get YouTube thumbnail
 
 📊 System Commands:
 • /myip - Get your current IP information
@@ -1881,23 +2339,29 @@ bot.command('help', async (ctx) => {
 • /sync - Sync registration (if approved but lost access)
 
 💎 Premium Benefits:
-• 🔄 Unlimited queries per day
-• ⚡ Priority API access
-• 🔧 Advanced lookup tools
-• 📞 24/7 premium support
-• 🎯 Higher rate limits
+ ${user.isPremium ? '✅ Unlimited queries' : '🔒 Upgrade for unlimited queries'}
+ ${user.isPremium ? '✅ Priority API access' : '🔒 Priority processing'}
+ ${user.isPremium ? '✅ Advanced tools' : '🔒 Advanced features'}
+ ${user.isPremium ? '✅ 24/7 support' : '🔒 Premium support'}
 
 📝 Usage Examples:
 • /ip 8.8.8.8
 • /email user@example.com
 • /num 9389482769
 • /basicnum 919087654321
-• /paknum 03005854962
+• /pak 03005854962
 • /ig instagram
+• /ifsc SBIN0001234
+• /pincode 400001
+• /postoffice Delhi
 • /dl https://www.instagram.com/reel/DSSvFDgjU3s/
 • /snap https://snapchat.com/t/H2D8zTxt
 • /pin https://pin.it/4gsJMxtt1
 • /fb https://www.facebook.com/reel/1157396829623170/
+• /youtube https://youtu.be/8of5w7RgcTc
+• /twitter https://twitter.com/user/status/123456789
+• /imggen cute girl with dog
+• /thumb https://youtu.be/8of5w7RgcTc
 
 ⚠️ Important Notes:
 • Each query consumes 1 credit
@@ -3636,7 +4100,7 @@ bot.command('test', async (ctx) => {
 
 // Test command
 bot.command('test', async (ctx) => {
-  await sendFormattedMessage(ctx, '✅ Bot is working! 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /paknum 03005854962\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
+  await sendFormattedMessage(ctx, '✅ Bot is working! 🚀\n\nAll commands are operational. Try:\n• /start\n• /register\n• /ip 8.8.8.8\n• /email test@example.com\n• /num 9389482769\n• /basicnum 919087654321\n• /pak 03005854962\n• /myip\n• /dl <video_url> (new universal command)\n• /admin (for admin)');
 });
 
 // Error handling with conflict resolution
@@ -3682,6 +4146,11 @@ bot.start().then(() => {
   console.log('🔧 Real maintenance mode functionality is now active!');
   console.log('📢 Channel membership verification is now active!');
   console.log('🇵🇰 Updated Pakistani government number lookup with new API endpoint!');
+  console.log('📮 New postal pincode and post office lookup commands added!');
+  console.log('🏦 New IFSC code lookup command added!');
+  console.log('🎨 New AI image generation command added!');
+  console.log('🖼️ New YouTube thumbnail command added!');
+  console.log('📺 New YouTube and Twitter downloader commands added!');
 }).catch((error) => {
   console.error('❌ Failed to start bot:', error);
   
