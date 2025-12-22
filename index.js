@@ -1,8 +1,5 @@
 const { Bot, InlineKeyboard } = require('grammy');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
 
 // Load environment variables
 require('dotenv').config();
@@ -38,104 +35,9 @@ const verifiedUsers = new Set(); // Track users who have verified channel member
 const registeredUsers = new Set(); // Track users who have completed registration
 const adminId = process.env.ADMIN_USER_ID;
 
-
-// Public admin contact (shown to users)
-const ADMIN_CONTACT = '@fuck_sake';
 // Maintenance mode flag (stored in memory, will reset on bot restart)
 let maintenanceMode = false;
 let maintenanceMessage = "Bot is currently under maintenance. Please try again later.";
-
-// ===============================
-// ADMIN SAFETY: BAN/MUTE + ALERTS + DYNAMIC CONFIG
-// ===============================
-const bannedUsers = new Set(); // userId strings
-const mutedUsers = new Map();  // userId -> { until: number(ms), reason: string, by: string }
-const adminAudit = []; // small in-memory audit trail
-
-// Suspicious activity tracker (per user per window)
-const activityWindowMs = 60 * 1000;
-const activityThreshold = 25; // commands/min before alert
-const activityTracker = new Map(); // userId -> { windowStart, count, distinctQueries:Set, lastAlertAt }
-
-// Dynamic endpoints + keys (persisted to local file; Railway safe)
-const CONFIG_FILE = path.join(process.cwd(), 'osint_dynamic_config.json');
-const dynamicConfig = {
-  endpoints: {
-    pincode: 'https://api.postalpincode.in/pincode/{q}',
-    postoffice: 'https://api.postalpincode.in/postoffice/{q}',
-    pak: 'https://rehu-pak-info.vercel.app/api/lookup?query={q}&pretty=1',
-    ifsc: 'https://ab-ifscinfoapi.vercel.app/info?ifsc={q}',
-  },
-  apiKeys: {
-    vehicle: 'demo123',
-    phone: 'Demo'
-  }
-};
-
-function loadDynamicConfig() {
-  try {
-    if (fs.existsSync(CONFIG_FILE)) {
-      const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        if (parsed.endpoints && typeof parsed.endpoints === 'object') {
-          dynamicConfig.endpoints = { ...dynamicConfig.endpoints, ...parsed.endpoints };
-        }
-        if (parsed.apiKeys && typeof parsed.apiKeys === 'object') {
-          dynamicConfig.apiKeys = { ...dynamicConfig.apiKeys, ...parsed.apiKeys };
-        }
-      }
-    }
-  } catch (e) {
-    console.error('[CONFIG LOAD ERROR]', e);
-  }
-}
-
-function saveDynamicConfig() {
-  try {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(dynamicConfig, null, 2));
-  } catch (e) {
-    console.error('[CONFIG SAVE ERROR]', e);
-  }
-}
-
-function tpl(urlTemplate, q) {
-  const v = encodeURIComponent(String(q ?? ''));
-  return String(urlTemplate || '').replace('{q}', v);
-}
-
-loadDynamicConfig();
-
-function audit(action, by, details = {}) {
-  try {
-    adminAudit.unshift({ ts: new Date().toISOString(), action, by, details });
-    if (adminAudit.length > 200) adminAudit.pop();
-  } catch (_) {}
-}
-
-function parseDurationToMs(s) {
-  const str = String(s || '').trim().toLowerCase();
-  if (!str) return null;
-  const m = str.match(/^([0-9]+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)$/);
-  if (!m) return null;
-  const n = parseInt(m[1], 10);
-  const unit = m[2];
-  if (isNaN(n) || n <= 0) return null;
-  if (unit.startsWith('s')) return n * 1000;
-  if (unit.startsWith('m')) return n * 60 * 1000;
-  if (unit.startsWith('h')) return n * 60 * 60 * 1000;
-  if (unit.startsWith('d')) return n * 24 * 60 * 60 * 1000;
-  return null;
-}
-
-async function safeSendToChannel(htmlText) {
-  try {
-    await bot.api.sendMessage(CHANNEL_ID, htmlText, { parse_mode: 'HTML', disable_web_page_preview: true });
-  } catch (e) {
-    console.error('[CHANNEL SEND ERROR]', e?.message || e);
-  }
-}
-
 
 // Validate admin ID
 if (!adminId) {
@@ -145,7 +47,7 @@ if (!adminId) {
 
 console.log('✅ Environment variables loaded successfully');
 console.log(`🤖 Bot Token: ${botToken.substring(0, 10)}...`);
-console.log(`👑 Admin: ${ADMIN_CONTACT}`);
+console.log(`👑 Admin ID: ${adminId}`);
 
 // Initialize admin user
 users.set(adminId, {
@@ -251,7 +153,7 @@ async function getIpInfo(ip) {
 
 async function getPhoneNumberInfo(number) {
   try {
-    const response = await axios.get(`https://hitackgrop.vercel.app/get_data?mobile=${encodeURIComponent(number)}&key=${encodeURIComponent(dynamicConfig.apiKeys.phone || 'Demo')}`);
+    const response = await axios.get(`https://hitackgrop.vercel.app/get_data?mobile=${number}&key=Demo`);
     return { success: true, data: response.data };
   } catch (error) {
     return { success: false, error: 'Failed to fetch phone number information' };
@@ -287,7 +189,7 @@ async function getBinInfo(bin) {
 
 async function getVehicleInfo(vehicleNumber) {
   try {
-    const response = await axios.get(`https://vehicle-api-isuzu3-8895-nexusxnikhils-projects.vercel.app/api/vehicle?apikey=${encodeURIComponent(dynamicConfig.apiKeys.vehicle || 'demo123')}&vehical=${encodeURIComponent(vehicleNumber)}`);
+    const response = await axios.get(`https://vehicle-api-isuzu3-8895-nexusxnikhils-projects.vercel.app/api/vehicle?apikey=demo123&vehical=${vehicleNumber}`);
     return { success: true, data: response.data };
   } catch (error) {
     return { success: false, error: 'Failed to fetch vehicle information' };
@@ -308,7 +210,7 @@ async function getFreeFireStats(uid) {
 // ===============================
 async function getIndiaPincodeInfo(pincode) {
   try {
-    const res = await axios.get(tpl(dynamicConfig.endpoints.pincode, pincode), { timeout: 20000 });
+    const res = await axios.get(`https://api.postalpincode.in/pincode/${encodeURIComponent(pincode)}`, { timeout: 20000 });
     return { success: true, data: res.data };
   } catch (error) {
     return { success: false, error: 'Failed to fetch India pincode information' };
@@ -317,7 +219,7 @@ async function getIndiaPincodeInfo(pincode) {
 
 async function getIndiaPostOfficeInfo(query) {
   try {
-    const res = await axios.get(tpl(dynamicConfig.endpoints.postoffice, query), { timeout: 20000 });
+    const res = await axios.get(`https://api.postalpincode.in/postoffice/${encodeURIComponent(query)}`, { timeout: 20000 });
     return { success: true, data: res.data };
   } catch (error) {
     return { success: false, error: 'Failed to fetch India post office information' };
@@ -329,7 +231,7 @@ async function getIndiaPostOfficeInfo(query) {
 // ===============================
 async function getRehuPakInfo(query) {
   try {
-    const res = await axios.get(tpl(dynamicConfig.endpoints.pak, query), { timeout: 30000 });
+    const res = await axios.get(`https://rehu-pak-info.vercel.app/api/lookup?query=${encodeURIComponent(query)}&pretty=1`, { timeout: 30000 });
     return { success: true, data: res.data };
   } catch (error) {
     return { success: false, error: 'Failed to fetch /pak lookup information' };
@@ -341,7 +243,7 @@ async function getRehuPakInfo(query) {
 // ===============================
 async function getIfscInfo(ifsc) {
   try {
-    const res = await axios.get(tpl(dynamicConfig.endpoints.ifsc, ifsc), { timeout: 20000 });
+    const res = await axios.get(`https://ab-ifscinfoapi.vercel.app/info?ifsc=${encodeURIComponent(ifsc)}`, { timeout: 20000 });
     return { success: true, data: res.data };
   } catch (error) {
     return { success: false, error: 'Failed to fetch IFSC information' };
@@ -1014,82 +916,6 @@ bot.use((ctx, next) => {
   }
   
   // Otherwise, continue to next middleware
-  return next();
-});
-
-// Middleware: ban/mute + suspicious activity (Railway-safe, never crashes)
-bot.use(async (ctx, next) => {
-  const uid = ctx.from?.id?.toString();
-  if (!uid) return next();
-
-  // Admins bypass
-  if (isAdmin(uid)) return next();
-
-  // Ban check
-  if (bannedUsers.has(uid) || users.get(uid)?.isBanned) {
-    try {
-      return await ctx.reply('🚫 You are banned from using this bot.');
-    } catch (_) {
-      return;
-    }
-  }
-
-  // Mute check
-  const mute = mutedUsers.get(uid);
-  if (mute && mute.until && Date.now() < mute.until) {
-    const leftMs = mute.until - Date.now();
-    const mins = Math.ceil(leftMs / 60000);
-    try {
-      return await ctx.reply(`🔇 You are muted for ${mins} minute(s).\nReason: ${mute.reason || 'N/A'}`);
-    } catch (_) {
-      return;
-    }
-  } else if (mute && mute.until && Date.now() >= mute.until) {
-    mutedUsers.delete(uid);
-  }
-
-  // Suspicious activity tracker (counts any message/command)
-  try {
-    const now = Date.now();
-    const rec = activityTracker.get(uid) || { windowStart: now, count: 0, distinctQueries: new Set(), lastAlertAt: 0 };
-    if (now - rec.windowStart > activityWindowMs) {
-      rec.windowStart = now;
-      rec.count = 0;
-      rec.distinctQueries = new Set();
-    }
-    rec.count += 1;
-
-    // Track distinct query strings (best effort)
-    const t = ctx.message?.text || '';
-    if (typeof t === 'string' && t.length > 0 && t.length < 80) {
-      rec.distinctQueries.add(t);
-      if (rec.distinctQueries.size > 18 && now - rec.lastAlertAt > 5 * 60 * 1000) {
-        rec.lastAlertAt = now;
-        await safeSendToChannel(
-          `⚠️ <b>Suspicious Activity</b>\n\n` +
-          `User: <code>${escapeHtml(uid)}</code>\n` +
-          `Distinct cmds in 1m: <b>${rec.distinctQueries.size}</b>\n` +
-          `Sample: <code>${escapeHtml(t)}</code>`
-        );
-      }
-    }
-
-    // Alert on high volume
-    if (rec.count >= activityThreshold && now - rec.lastAlertAt > 5 * 60 * 1000) {
-      rec.lastAlertAt = now;
-      await safeSendToChannel(
-        `🚨 <b>Flood Alert</b>\n\nUser: <code>${escapeHtml(uid)}</code>\nRequests/min: <b>${rec.count}</b>`
-      );
-
-      // Auto-mute 10 minutes (safe)
-      mutedUsers.set(uid, { until: now + 10 * 60 * 1000, reason: 'Auto-mute (flood)', by: 'system' });
-    }
-
-    activityTracker.set(uid, rec);
-  } catch (e) {
-    console.error('[SUSPICIOUS TRACK ERROR]', e);
-  }
-
   return next();
 });
 
@@ -2546,7 +2372,7 @@ bot.command('credits', async (ctx) => {
 
 🎁 Want more credits?
 • Upgrade to Premium for unlimited access
-• Contact admin: @fuck_sake
+• Contact admin for credit requests
 
 💡 Each query consumes 1 credit`;
 
@@ -2697,15 +2523,6 @@ bot.command('admin', async (ctx) => {
 • /resetuser <user_id> - 🔄 Reset user account
 • /logs - 📜 View system logs
 • /backup - 💾 Create database backup
-• /exportusers - 👥 Export users JSON
-• /exportbans - 🚫 Export banned users JSON
-• /exportmuted - 🔇 Export muted users JSON
-• /endpoint - 🌐 Manage endpoints
-• /apikey - 🔑 Manage API keys
-• /ban /unban - 🚫 Ban controls
-• /mute /unmute - 🔇 Mute controls
-• /health - 🩺 Bot health
-• /adminaudit - 🧾 Admin audit
 
 📊 Current Statistics:
 • 👥 Total Users: ${totalUsers}
@@ -3049,7 +2866,7 @@ bot.command('premium', async (ctx) => {
 📋 Status Changed:
 • Premium access revoked
 • Back to standard features
-• Contact admin: @fuck_sake
+• Contact admin for details
 
 📞 If you have questions, please reach out to support`;
 
@@ -3994,7 +3811,7 @@ bot.command('massremovepremium', async (ctx) => {
 📋 Status Changed:
 • Premium access revoked
 • Back to standard features
-• Contact admin: @fuck_sake
+• Contact admin for details
 
 📞 If you have questions about this change, please reach out to support`;
 
@@ -4051,7 +3868,7 @@ bot.command('removepremium', async (ctx) => {
 📋 Status Changed:
 • Premium access revoked
 • Back to standard features
-• Contact admin: @fuck_sake
+• Contact admin for details
 
 📞 If you have questions about this change, please reach out to support`;
 
@@ -4142,7 +3959,7 @@ bot.command('resetuser', async (ctx) => {
 • Premium: ${wasPremium ? 'Yes → No' : 'No'}
 • Admin: ${wasAdmin ? 'Yes (unchanged)' : 'No'}
 
-📞 If you have questions about this reset, please contact admin: @fuck_sake`;
+📞 If you have questions about this reset, please contact admin`;
 
   await notifyUser(targetUserId, userMessage);
 
@@ -4194,7 +4011,7 @@ bot.command('logs', async (ctx) => {
 🔧 System Configuration:
 • Maintenance Mode: ${maintenanceMode ? 'ON' : 'OFF'}
 • Bot Start Time: ${new Date().toLocaleString()}
-• Admin: ${ADMIN_CONTACT}
+• Admin ID: ${adminId}
 
 📝 Note: This is a basic log overview. For detailed logs, check your hosting provider's logs.`;
 
@@ -4268,254 +4085,6 @@ bot.command('backup', async (ctx) => {
     console.error('Error sending backup:', error);
     await sendFormattedMessage(ctx, '❌ Failed to create or send backup. The backup data might be too large for Telegram.');
   }
-});
-
-
-// ===============================
-// ELITE ADMIN: USER MANAGEMENT (BAN/MUTE), CONFIG MANAGER, ALERTS, EXPORTS, HEALTH
-// ===============================
-function requireAdmin(ctx) {
-  const telegramId = ctx.from?.id?.toString();
-  return telegramId && isAdmin(telegramId);
-}
-
-bot.command('health', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-
-  try {
-    const mem = process.memoryUsage();
-    const up = process.uptime();
-    const load = os.loadavg ? os.loadavg() : [];
-    const totalUsers = users.size;
-    const approvedUsers = Array.from(users.values()).filter(u => u.isApproved).length;
-    const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
-
-    const msg =
-      `🩺 <b>Bot Health</b>\n\n` +
-      `⏱️ Uptime: <code>${Math.floor(up)}s</code>\n` +
-      `🧠 RAM: <code>${Math.round(mem.rss/1024/1024)}MB</code> (rss)\n` +
-      `📦 Heap: <code>${Math.round(mem.heapUsed/1024/1024)}MB</code> / <code>${Math.round(mem.heapTotal/1024/1024)}MB</code>\n` +
-      `🖥️ Node: <code>${escapeHtml(process.version)}</code>\n` +
-      `🧩 Platform: <code>${escapeHtml(process.platform)}</code>\n` +
-      `📈 LoadAvg: <code>${escapeHtml(JSON.stringify(load))}</code>\n\n` +
-      `👥 Users: <b>${totalUsers}</b> | ✅ Approved: <b>${approvedUsers}</b> | 💎 Premium: <b>${premiumUsers}</b>\n` +
-      `🚫 Banned: <b>${bannedUsers.size}</b> | 🔇 Muted: <b>${mutedUsers.size}</b>\n` +
-      `🔧 Maintenance: <b>${maintenanceMode ? 'ON' : 'OFF'}</b>\n\n` +
-      `🗂️ Config file: <code>${escapeHtml(CONFIG_FILE)}</code>`;
-
-    await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true });
-  } catch (e) {
-    console.error('[HEALTH ERROR]', e);
-    await sendFormattedMessage(ctx, '❌ Failed to generate health report.');
-  }
-});
-
-// --- Ban / Unban ---
-bot.command('ban', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const args = (ctx.match || '').toString().trim().split(/\s+/).filter(Boolean);
-  const target = args[0];
-  const reason = args.slice(1).join(' ') || 'N/A';
-  if (!target) return sendFormattedMessage(ctx, '🚫 Usage: /ban <user_id> <reason(optional)>');
-
-  bannedUsers.add(target);
-  const u = users.get(target);
-  if (u) u.isBanned = true;
-
-  audit('ban', ctx.from?.id?.toString(), { target, reason });
-
-  await sendFormattedMessage(ctx, `✅ Banned user: ${target}\nReason: ${reason}`);
-  await safeSendToChannel(`🚫 <b>User Banned</b>\nUser: <code>${escapeHtml(target)}</code>\nBy: <code>${escapeHtml(ctx.from?.id?.toString() || '')}</code>\nReason: <code>${escapeHtml(reason)}</code>`);
-});
-
-bot.command('unban', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const target = (ctx.match || '').toString().trim();
-  if (!target) return sendFormattedMessage(ctx, '✅ Usage: /unban <user_id>');
-
-  bannedUsers.delete(target);
-  const u = users.get(target);
-  if (u) u.isBanned = false;
-
-  audit('unban', ctx.from?.id?.toString(), { target });
-
-  await sendFormattedMessage(ctx, `✅ Unbanned user: ${target}`);
-});
-
-// --- Mute / Unmute ---
-bot.command('mute', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const raw = (ctx.match || '').toString().trim();
-  const parts = raw.split(/\s+/).filter(Boolean);
-  const target = parts[0];
-  const durStr = parts[1];
-  const reason = parts.slice(2).join(' ') || 'N/A';
-
-  if (!target || !durStr) {
-    return sendFormattedMessage(ctx, '🔇 Usage: /mute <user_id> <10m|1h|1d> <reason(optional)>\nExample: /mute 123456789 10m spam');
-  }
-
-  const ms = parseDurationToMs(durStr);
-  if (!ms) return sendFormattedMessage(ctx, '❌ Invalid duration. Use like: 10m, 1h, 2d');
-
-  mutedUsers.set(target, { until: Date.now() + ms, reason, by: ctx.from?.id?.toString() });
-  audit('mute', ctx.from?.id?.toString(), { target, durStr, reason });
-
-  await sendFormattedMessage(ctx, `✅ Muted user: ${target}\nDuration: ${durStr}\nReason: ${reason}`);
-});
-
-bot.command('unmute', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const target = (ctx.match || '').toString().trim();
-  if (!target) return sendFormattedMessage(ctx, '✅ Usage: /unmute <user_id>');
-
-  mutedUsers.delete(target);
-  audit('unmute', ctx.from?.id?.toString(), { target });
-
-  await sendFormattedMessage(ctx, `✅ Unmuted user: ${target}`);
-});
-
-// --- Dynamic API key manager ---
-bot.command('apikey', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const raw = (ctx.match || '').toString().trim();
-  const [action, name, ...rest] = raw.split(/\s+/).filter(Boolean);
-  const value = rest.join(' ');
-
-  if (!action) {
-    return sendFormattedMessage(ctx,
-      '🔑 Usage:\n' +
-      '• /apikey show\n' +
-      '• /apikey set <name> <value>\n' +
-      '• /apikey del <name>\n\n' +
-      'Examples:\n' +
-      '• /apikey set vehicle MYKEY\n' +
-      '• /apikey set phone Demo'
-    );
-  }
-
-  if (action === 'show') {
-    const masked = {};
-    for (const [k, v] of Object.entries(dynamicConfig.apiKeys || {})) {
-      const s = String(v ?? '');
-      masked[k] = s ? (s.length <= 4 ? '****' : s.substring(0, 2) + '****' + s.substring(s.length - 2)) : '';
-    }
-    return ctx.reply(`🔑 <b>API Keys</b>\n<pre>${escapeHtml(JSON.stringify(masked, null, 2))}</pre>`, { parse_mode: 'HTML' });
-  }
-
-  if (!name) return sendFormattedMessage(ctx, '❌ Missing key name.');
-
-  if (action === 'set') {
-    if (!value) return sendFormattedMessage(ctx, '❌ Missing key value.');
-    dynamicConfig.apiKeys[name] = value;
-    saveDynamicConfig();
-    audit('apikey_set', ctx.from?.id?.toString(), { name });
-    return sendFormattedMessage(ctx, `✅ API key saved: ${name}`);
-  }
-
-  if (action === 'del') {
-    delete dynamicConfig.apiKeys[name];
-    saveDynamicConfig();
-    audit('apikey_del', ctx.from?.id?.toString(), { name });
-    return sendFormattedMessage(ctx, `✅ API key deleted: ${name}`);
-  }
-
-  return sendFormattedMessage(ctx, '❌ Unknown action. Use: show | set | del');
-});
-
-// --- Dynamic endpoint manager ---
-bot.command('endpoint', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const raw = (ctx.match || '').toString().trim();
-  const [action, name, ...rest] = raw.split(/\s+/).filter(Boolean);
-  const value = rest.join(' ');
-
-  if (!action) {
-    return sendFormattedMessage(ctx,
-      '🌐 Usage:\n' +
-      '• /endpoint show\n' +
-      '• /endpoint set <name> <urlTemplate>\n' +
-      '• /endpoint del <name>\n\n' +
-      'Templates must include {q}\n' +
-      'Example:\n' +
-      '• /endpoint set ifsc https://ab-ifscinfoapi.vercel.app/info?ifsc={q}'
-    );
-  }
-
-  if (action === 'show') {
-    return ctx.reply(`🌐 <b>Endpoints</b>\n<pre>${escapeHtml(JSON.stringify(dynamicConfig.endpoints, null, 2))}</pre>`, { parse_mode: 'HTML' });
-  }
-
-  if (!name) return sendFormattedMessage(ctx, '❌ Missing endpoint name.');
-
-  if (action === 'set') {
-    if (!value) return sendFormattedMessage(ctx, '❌ Missing endpoint value.');
-    if (!value.includes('{q}')) return sendFormattedMessage(ctx, '❌ Endpoint template must contain {q}.');
-    dynamicConfig.endpoints[name] = value;
-    saveDynamicConfig();
-    audit('endpoint_set', ctx.from?.id?.toString(), { name });
-    return sendFormattedMessage(ctx, `✅ Endpoint saved: ${name}`);
-  }
-
-  if (action === 'del') {
-    delete dynamicConfig.endpoints[name];
-    saveDynamicConfig();
-    audit('endpoint_del', ctx.from?.id?.toString(), { name });
-    return sendFormattedMessage(ctx, `✅ Endpoint deleted: ${name}`);
-  }
-
-  return sendFormattedMessage(ctx, '❌ Unknown action. Use: show | set | del');
-});
-
-// --- Exports ---
-async function sendJsonDocument(ctx, obj, filename, caption) {
-  try {
-    const json = JSON.stringify(obj, null, 2);
-    await ctx.replyWithDocument(Buffer.from(json), { filename, caption });
-  } catch (e) {
-    console.error('[EXPORT ERROR]', e);
-    await sendFormattedMessage(ctx, '❌ Export failed (file too large or Telegram error).');
-  }
-}
-
-bot.command('exportusers', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const data = Array.from(users.entries()).map(([id, u]) => ({
-    id,
-    username: u.username,
-    firstName: u.firstName,
-    lastName: u.lastName,
-    isApproved: !!u.isApproved,
-    isPremium: !!u.isPremium,
-    isAdmin: !!u.isAdmin,
-    isBanned: !!u.isBanned,
-    credits: u.credits,
-    totalQueries: u.totalQueries,
-    registrationDate: u.registrationDate
-  }));
-  await sendJsonDocument(ctx, { exportedAt: new Date().toISOString(), users: data }, `users_${Date.now()}.json`,
-    `👥 Export Users\nTotal: ${data.length}`);
-});
-
-bot.command('exportbans', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const bans = Array.from(bannedUsers.values());
-  await sendJsonDocument(ctx, { exportedAt: new Date().toISOString(), bannedUsers: bans }, `bans_${Date.now()}.json`,
-    `🚫 Export Bans\nTotal: ${bans.length}`);
-});
-
-bot.command('exportmuted', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const muted = Array.from(mutedUsers.entries()).map(([id, v]) => ({ id, ...v }));
-  await sendJsonDocument(ctx, { exportedAt: new Date().toISOString(), mutedUsers: muted }, `muted_${Date.now()}.json`,
-    `🔇 Export Muted\nTotal: ${muted.length}`);
-});
-
-bot.command('adminaudit', async (ctx) => {
-  if (!requireAdmin(ctx)) return sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
-  const slice = adminAudit.slice(0, 30);
-  await sendJsonDocument(ctx, { exportedAt: new Date().toISOString(), last: slice }, `admin_audit_${Date.now()}.json`,
-    `🧾 Admin Audit (latest 30)`);
 });
 
 // Check registration status command
@@ -4654,7 +4223,7 @@ process.on('SIGTERM', () => {
 // ===============================
 console.log('🚀 Starting Premium OSINT Bot with Complete Admin Panel & Registration Management...');
 console.log(`🤖 Bot Username: @OsintShit_Bot`);
-console.log(`👑 Admin: ${ADMIN_CONTACT}`);
+console.log(`👑 Admin ID: ${adminId}`);
 console.log('📡 Starting polling...');
 
 bot.start().then(() => {
