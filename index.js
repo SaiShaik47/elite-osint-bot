@@ -250,47 +250,126 @@ async function getIfscInfo(ifsc) {
   }
 }
 
-
 // ===============================
-// IMEI INFO (dash.imei.info)
+// YOUTUBE THUMBNAIL (SEND AS IMAGE)
 // ===============================
-async function getImeiInfo(imei) {
-  const apiKey = process.env.IMEI_API_KEY;
+async function sendYouTubeThumb(ctx, ytUrl) {
+  const thumbApi = `https://old-studio-thum-down.oldhacker7866.workers.dev/?url=${encodeURIComponent(ytUrl)}`;
 
-  // Only enable if key exists (prevents Railway misconfig crashes)
-  if (!apiKey) {
-    return { success: false, error: 'IMEI lookup is not configured. Set IMEI_API_KEY in environment variables.' };
+  const apiMeta = {
+    ok: false,
+    api: thumbApi,
+    input: ytUrl,
+    status: null,
+    contentType: null,
+    extractedImageUrl: null,
+    note: null,
+  };
+
+  // Robust: fetch ourselves, then upload buffer to Telegram.
+  const res = await axios.get(thumbApi, {
+    timeout: 45000,
+    responseType: 'arraybuffer',
+    validateStatus: () => true,
+    headers: {
+      'accept': 'image/*,application/json;q=0.9,*/*;q=0.8',
+      'user-agent': 'Mozilla/5.0'
+    }
+  });
+
+  apiMeta.status = res.status;
+  apiMeta.contentType = String(res.headers?.['content-type'] || '').toLowerCase();
+
+  const ct = apiMeta.contentType;
+
+  // Helper: send pretty JSON response (Telegram doesn't truly color JSON; codeblock is the closest)
+  async function sendJsonResponse(extra = {}) {
+    const payload = { ...apiMeta, ...extra };
+    const pretty = JSON.stringify(payload, null, 2);
+    await sendFormattedMessage(
+      ctx,
+      `🎨 *Thumbnail API Response*
+
+\`\`\`json
+${pretty}
+\`\`\``
+    );
   }
 
-  const clean = String(imei || '').trim();
+  // Case 1: API returns image directly
+  if (res.status >= 200 && res.status < 300 && ct.startsWith('image/')) {
+    apiMeta.ok = true;
+    apiMeta.note = "API returned image directly";
+    const buf = Buffer.from(res.data);
+    await ctx.replyWithPhoto(
+      { source: buf },
+      { caption: `🖼️ YouTube Thumbnail
 
-  // Basic sanity check: most IMEIs are 15 digits (sometimes 14/16/17 show up with test data)
-  if (!/^\d{14,17}$/.test(clean)) {
-    return { success: false, error: 'Invalid IMEI format. Use digits only (typically 15 digits).' };
+🔗 ${ytUrl}` }
+    );
+    await sendJsonResponse();
+    return;
   }
 
-  const url = `https://dash.imei.info/api/check/0/?imei=${encodeURIComponent(clean)}&API_KEY=${encodeURIComponent(apiKey)}`;
-
+  // Case 2: API returns JSON (or text) with an image URL inside
+  let jsonObj = null;
+  let rawText = null;
   try {
-    const res = await axios.get(url, {
-      timeout: 30000,
+    rawText = Buffer.from(res.data || '').toString('utf-8');
+    jsonObj = JSON.parse(rawText);
+  } catch (_) {}
+
+  const foundUrl = findFirstUrlDeep(jsonObj);
+  if (foundUrl) {
+    apiMeta.ok = true;
+    apiMeta.extractedImageUrl = foundUrl;
+    apiMeta.note = "Extracted image URL from JSON response";
+    const imgRes = await axios.get(foundUrl, {
+      timeout: 45000,
+      responseType: 'arraybuffer',
       validateStatus: () => true,
-      headers: {
-        'User-Agent': 'okhttp/4.9.2',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Encoding': 'gzip'
-      }
+      headers: { 'accept': 'image/*,*/*;q=0.8', 'user-agent': 'Mozilla/5.0' }
     });
 
-    if (res.status < 200 || res.status >= 300) {
-      return { success: false, error: `IMEI API failed (status ${res.status})`, data: res.data };
+    const imgCt = String(imgRes.headers?.['content-type'] || '').toLowerCase();
+    if (imgRes.status >= 200 && imgRes.status < 300 && imgCt.startsWith('image/')) {
+      const buf = Buffer.from(imgRes.data);
+      await ctx.replyWithPhoto(
+        { source: buf },
+        { caption: `🖼️ YouTube Thumbnail
+
+🔗 ${ytUrl}` }
+      );
+      await sendJsonResponse({ apiJson: jsonObj ?? undefined });
+      return;
     }
 
-    return { success: true, data: res.data };
-  } catch (error) {
-    return { success: false, error: 'Failed to fetch IMEI information' };
+    // If image fetch failed, still show response
+    apiMeta.ok = false;
+    apiMeta.note = `Found image URL but failed to download image (status=${imgRes.status}, ct=${imgCt})`;
+    await sendJsonResponse({ apiJson: jsonObj ?? undefined });
+    throw new Error(apiMeta.note);
   }
+
+  // Case 3: last resort – try letting Telegram fetch by URL (sometimes works)
+  try {
+    apiMeta.ok = true;
+    apiMeta.note = "Telegram fetched image by URL (fallback)";
+    await ctx.replyWithPhoto(thumbApi, { caption: `🖼️ YouTube Thumbnail
+
+🔗 ${ytUrl}` });
+    await sendJsonResponse({ apiText: rawText ?? undefined });
+    return;
+  } catch (_) {}
+
+  apiMeta.ok = false;
+  apiMeta.note = `Thumbnail API did not return a usable image. status=${res.status} ct=${ct}`;
+  await sendJsonResponse({ apiText: rawText ?? undefined });
+  throw new Error(apiMeta.note);
 }
+
+
+
 
 // NEW: Pakistani Government Number Information API
 async function getPakistaniGovtNumberInfo(number) {
@@ -748,6 +827,40 @@ async function sendFormattedMessage(ctx, text) {
   }
 }
 
+
+// Helper: if message is too long for Telegram, send as .txt file instead
+async function sendLongOrFile(ctx, text, filenamePrefix = 'output') {
+  const safePrefix = (filenamePrefix || 'output')
+    .toString()
+    .replace(/[^a-zA-Z0-9_\-]+/g, '_')
+    .slice(0, 40);
+
+  // Telegram message limit is 4096 chars. Keep some buffer for Markdown parse.
+  const MAX_LEN = 3800;
+
+  if ((text || '').length <= MAX_LEN) {
+    return sendFormattedMessage(ctx, text);
+  }
+
+  const fileName = `${safePrefix}_${Date.now()}.txt`;
+  const buffer = Buffer.from(text, 'utf-8');
+
+  try {
+    await ctx.replyWithDocument(
+      { source: buffer, filename: fileName },
+      { caption: '📄 Output was too long, so I sent it as a .txt file.' }
+    );
+  } catch (err) {
+    // Fallback: split into chunks if document upload fails
+    const plain = (text || '').toString();
+    for (let i = 0; i < plain.length; i += 3500) {
+      // eslint-disable-next-line no-await-in-loop
+      await ctx.reply(plain.slice(i, i + 3500));
+    }
+  }
+}
+
+
 // Helper function for admin notifications
 async function notifyUser(userId, message) {
   try {
@@ -966,7 +1079,6 @@ bot.callbackQuery("menu_osint", async (ctx) => {
 • /pak <query> — Pakistan lookup (rehu)
 • /ig <username> — Instagram intelligence
 • /bin <number> — BIN lookup
-• /imei <imei> — IMEI info
 • /vehicle <number> — Vehicle details
 • /ff <uid> — Free Fire stats`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
@@ -981,7 +1093,8 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /insta <url> — Instagram downloader
 • /pin <url> — Pinterest downloader
 • /fb <url> — Facebook downloader
-• /terabox <url> — TeraBox downloader`;
+• /terabox <url> — TeraBox downloader
+• /thumb <url> — YouTube thumbnail (image)`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
@@ -1655,53 +1768,6 @@ bot.command('basicnum', async (ctx) => {
   }
 });
 
-
-// ===============================
-// IMEI INFO
-// ===============================
-bot.command('imei', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
-  }
-
-  // Check credits
-  if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
-    return;
-  }
-
-  const imei = (ctx.match || '').toString().trim();
-  if (!imei) {
-    // Refund because user didn't actually run lookup
-    user.credits += 1;
-    await sendFormattedMessage(ctx, '📱 Usage: /imei <IMEI>\n\nExample: /imei 356938035643809\n\n💳 1 credit refunded');
-    return;
-  }
-
-  await sendFormattedMessage(ctx, '🔍 Checking IMEI information...');
-
-  try {
-    const result = await getImeiInfo(imei);
-
-    if (result.success && result.data) {
-      const response = `📱 IMEI Information 📱\n\n🔎 Query: \`${escapeMd(imei)}\`\n\n\`\`\`json\n${JSON.stringify(result.data, null, 2)}\n\`\`\`\n\n💡 IMEI info for educational purposes only\n• 1 credit deducted from your balance`;
-      await sendFormattedMessage(ctx, response);
-      user.totalQueries++;
-    } else {
-      // Refund credit on failure
-      user.credits += 1;
-      await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to fetch IMEI information'}\n💳 1 credit refunded`);
-    }
-  } catch (error) {
-    console.error('Error in imei command:', error);
-    user.credits += 1; // Refund credit on error
-    await sendFormattedMessage(ctx, '❌ An error occurred while checking IMEI.\n💳 1 credit refunded');
-  }
-});
-
-
 // UPDATED: Pakistani Government Number Information command
 bot.command('paknum', async (ctx) => {
   const user = getOrCreateUser(ctx);
@@ -1790,7 +1856,7 @@ bot.command('pincode', async (ctx) => {
     const result = await getIndiaPincodeInfo(pincode);
     if (result.success && result.data) {
       const response = `📮 India Pincode Lookup 📮\n\n🔎 Query: \`${escapeMd(pincode)}\`\n\n\`\`\`json\n${JSON.stringify(result.data, null, 2)}\n\`\`\`\n\n• 1 credit deducted from your balance`;
-      await sendFormattedMessage(ctx, response);
+      await sendLongOrFile(ctx, response, `pincode_${pincode}`);
       user.totalQueries++;
     } else {
       user.credits += 1;
@@ -1827,7 +1893,7 @@ bot.command('postoffice', async (ctx) => {
     const result = await getIndiaPostOfficeInfo(query);
     if (result.success && result.data) {
       const response = `🏤 India Post Office Search 🏤\n\n🔎 Query: \`${escapeMd(query)}\`\n\n\`\`\`json\n${JSON.stringify(result.data, null, 2)}\n\`\`\`\n\n• 1 credit deducted from your balance`;
-      await sendFormattedMessage(ctx, response);
+      await sendLongOrFile(ctx, response, `postoffice_${query}`);
       user.totalQueries++;
     } else {
       user.credits += 1;
@@ -1942,6 +2008,39 @@ bot.command('ifsc', async (ctx) => {
     console.error('Error in ifsc command:', error);
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching IFSC info.\n💳 1 credit refunded');
+  }
+});
+
+// ===============================
+// YOUTUBE THUMBNAIL (DIRECT IMAGE)
+// ===============================
+bot.command('thumb', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const ytUrl = (ctx.match || '').toString().trim();
+  if (!ytUrl) {
+    await sendFormattedMessage(ctx, '🖼️ Usage: /thumb <YouTube link>\n\nExample: /thumb https://youtu.be/8of5w7RgcTc');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🖼️ Fetching thumbnail...');
+
+  try {
+    await sendYouTubeThumb(ctx, ytUrl);
+    user.totalQueries++;
+  } catch (error) {
+    console.error('Error in thumb command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ Failed to fetch thumbnail.\n💳 1 credit refunded');
   }
 });
 
@@ -2378,6 +2477,7 @@ bot.command('help', async (ctx) => {
 • /pincode 400001
 • /postoffice Delhi
 • /ifsc SBIN0001234
+• /thumb https://youtu.be/8of5w7RgcTc
 • /ig instagram
 • /dl https://www.instagram.com/reel/DSSvFDgjU3s/
 • /snap https://snapchat.com/t/H2D8zTxt
