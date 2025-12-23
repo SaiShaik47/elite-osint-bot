@@ -2412,7 +2412,7 @@ async function handleIban(ctx) {
         `🌍 Country: \`${escapeMd((result.data.country || 'RANDOM').toString())}\`\n` +
         `🔢 Count: \`${escapeMd(String(result.data.count))}\`\n` +
         `🧩 Source: \`${escapeMd(result.data.source)}\`\n\n` +
-        `\\`\\`\\`json\n${JSON.stringify(result.data, null, 2)}\n\\`\\`\\`\n\n` +
+        '```json\n' + JSON.stringify(result.data, null, 2) + '\n```\n\n' +
         `• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
