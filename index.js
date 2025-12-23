@@ -364,6 +364,54 @@ async function getFreeFireStats(uid) {
   }
 }
 
+
+// ===============================
+// RANDOM IBAN (randomiban.com)
+// ===============================
+async function getRandomIban(countryCode, count = 1) {
+  try {
+    const cc = (countryCode || '').toString().trim().toUpperCase();
+    const nRaw = Number(count);
+    const n = Number.isFinite(nRaw) ? Math.max(1, Math.min(10, Math.floor(nRaw))) : 1;
+
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      // randomiban.com sometimes has redirect chains; axios will follow them by default.
+      const url = cc ? `https://randomiban.com/?country=${encodeURIComponent(cc)}` : `https://randomiban.com/`;
+      const res = await axios.get(url, {
+        timeout: 20000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; OsintBot/1.0; +https://t.me/OsintShitUpdates)',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+        maxRedirects: 10,
+        validateStatus: (s) => s >= 200 && s < 400,
+      });
+
+      const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+
+      // Extract the first IBAN-like token.
+      const match = html.match(/\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/);
+      if (!match) {
+        throw new Error('Failed to parse IBAN from randomiban.com response');
+      }
+      out.push(match[0]);
+    }
+
+    return {
+      success: true,
+      data: {
+        source: 'randomiban.com',
+        country: cc || null,
+        count: out.length,
+        ibans: out,
+      },
+    };
+  } catch (error) {
+    return { success: false, error: 'Failed to generate random IBAN(s)' };
+  }
+}
+
 // ===============================
 // INDIA POSTAL (PINCODE / POST OFFICE)
 // ===============================
@@ -2302,6 +2350,86 @@ bot.command('bin', async (ctx) => {
   }
 });
 
+
+
+// ===============================
+// IBAN GENERATOR (randomiban.com)
+// ===============================
+async function handleIban(ctx) {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const raw = (ctx.match || '').toString().trim();
+  let country = '';
+  let count = 1;
+
+  if (raw) {
+    const parts = raw.split(/\s+/).filter(Boolean);
+    if (parts.length === 1) {
+      // Could be "GB" or "5"
+      if (/^\d+$/.test(parts[0])) count = Number(parts[0]);
+      else country = parts[0];
+    } else {
+      country = parts[0];
+      if (/^\d+$/.test(parts[1])) count = Number(parts[1]);
+    }
+  }
+
+  // safety clamp
+  if (!Number.isFinite(count)) count = 1;
+  count = Math.max(1, Math.min(10, Math.floor(count)));
+
+  const usage =
+    '🏦 Usage: /iban [COUNTRY_CODE] [COUNT]\n' +
+    '• COUNTRY_CODE: 2-letter (e.g., GB, DE, FR). Optional\n' +
+    '• COUNT: 1-10 (default 1)\n\n' +
+    'Examples:\n' +
+    '/iban\n' +
+    '/iban GB\n' +
+    '/iban DE 5';
+
+  if (raw && country && !/^[A-Z]{2}$/i.test(country)) {
+    user.credits += 1;
+    await sendFormattedMessage(ctx, `❌ Invalid country code.\n\n${usage}\n💳 1 credit refunded`);
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🏦 Generating IBAN(s)...');
+
+  try {
+    const result = await getRandomIban(country, count);
+
+    if (result.success && result.data) {
+      const response = `🏦 IBAN Generator 🏦\n\n` +
+        `🌍 Country: \`${escapeMd((result.data.country || 'RANDOM').toString())}\`\n` +
+        `🔢 Count: \`${escapeMd(String(result.data.count))}\`\n` +
+        `🧩 Source: \`${escapeMd(result.data.source)}\`\n\n` +
+        `\\`\\`\\`json\n${JSON.stringify(result.data, null, 2)}\n\\`\\`\\`\n\n` +
+        `• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to generate IBAN(s)'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in iban command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, `❌ Failed to generate IBAN(s).\n\n${usage}\n💳 1 credit refunded`);
+  }
+}
+
+bot.command('iban', handleIban);
+bot.command('randomiban', handleIban);
 bot.command('vehicle', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
