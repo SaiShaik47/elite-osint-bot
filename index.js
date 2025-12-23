@@ -1035,13 +1035,12 @@ function renderBar(pct) {
  *
  * Why: prevents "instant result while bar still running" and caps artificial wait time.
  */
-async function runWithLoading(ctx, title, taskFn, durationMs = 3800) {
+async function runWithLoading(ctx, title, taskFn, durationMs = 5000) {
   const startedAt = Date.now();
 
-  // Hard cap so it never drags on
-  const totalMs = Math.min(Math.max(Number(durationMs) || 3800, 1500), 5000);
-
-  // Send initial loading message
+  // EXACT 5s loading bar (keeps edits low to avoid Telegram rate limits)
+  const totalMs = 5000;
+  const steps = 12; // 12 edits total => safe + smooth
   const sent = await ctx.reply(
     `⏳ *${title}*\n\n${renderBar(0)}`,
     { parse_mode: 'Markdown' }
@@ -1050,13 +1049,15 @@ async function runWithLoading(ctx, title, taskFn, durationMs = 3800) {
   const chatId = sent.chat.id;
   const messageId = sent.message_id;
 
-  // Animate bar to 100% first (this is the "rate limiting / premium feel" delay)
-  const steps = 12; // smooth enough, not too many edit calls
-  const stepMs = Math.max(120, Math.floor(totalMs / steps));
-
+  // Animate to 100% BEFORE running taskFn (prevents result appearing early)
   for (let i = 1; i <= steps; i++) {
-    await new Promise((r) => setTimeout(r, stepMs));
     const pct = Math.min(100, Math.round((i / steps) * 100));
+
+    // Sleep until the exact target timestamp for this step
+    const target = startedAt + Math.round((i * totalMs) / steps);
+    const delay = Math.max(0, target - Date.now());
+    await new Promise((r) => setTimeout(r, delay));
+
     try {
       await ctx.api.editMessageText(
         chatId,
@@ -1065,27 +1066,20 @@ async function runWithLoading(ctx, title, taskFn, durationMs = 3800) {
         { parse_mode: 'Markdown' }
       );
     } catch (_) {
-      // ignore edit race / message deleted / etc.
+      // ignore edit race / message deleted / throttling
     }
   }
 
-  // NOW run the task (so results won't appear before the bar is finished)
+  // Now run the actual task (API call etc.)
   let taskResult;
   try {
     taskResult = await taskFn();
   } catch (err) {
-    const took = ((Date.now() - startedAt) / 1000).toFixed(2);
-    try {
-      await ctx.api.editMessageText(
-        chatId,
-        messageId,
-        `❌ *${title}* — failed in *${took}s*`,
-        { parse_mode: 'Markdown' }
-      );
-    } catch (_) {}
-    throw err;
+    const msg = (err && err.message) ? err.message : String(err);
+    taskResult = `❌ *${escapeMd(title)}* failed\n\n\`${escapeMd(msg)}\``;
   }
 
+  // Duration shown includes the 5s bar + task time (so users see total)
   const took = ((Date.now() - startedAt) / 1000).toFixed(2);
 
   // Mark done (short)
