@@ -1,4 +1,5 @@
-const { Bot, InlineKeyboard, Api } = require('grammy');
+const { Bot, InlineKeyboard } = require('grammy');
+const { AsyncLocalStorage } = require('async_hooks');
 const axios = require('axios');
 
 // Load environment variables
@@ -16,162 +17,127 @@ if (!botToken) {
 // Initialize bot
 const bot = new Bot(botToken);
 
-
 // ===============================
-// GLOBAL COMMAND + RESPONSE LOGGER
-// Sends every command and bot response to a log channel (e.g. @OsintLogsUpdates)
-// Requirements:
-// 1) Add your bot as ADMIN in the channel
-// 2) Set LOG_CHANNEL in env (recommended) OR use default below
+// UNIFIED COMMAND+RESPONSE LOGGER
 // ===============================
-const { AsyncLocalStorage } = require('async_hooks');
-const als = new AsyncLocalStorage();
+// Sends ONE log message per command/callback containing:
+// 📥 Command input + 📤 Bot response(s)
+const _als = new AsyncLocalStorage();
 
-const LOG_CHANNEL = process.env.LOG_CHANNEL || '@OsintLogsUpdates'; // can be @channelusername or numeric channel id
-const logApi = new Api(botToken); // separate API (no transformers) to avoid recursion
-
-function escapeHtml(s = '') {
-  return String(s)
+function _escapeHtml(str) {
+  return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
 
-async function sendLogText(html) {
-  if (!LOG_CHANNEL) return;
-  const MAX = 3900; // keep margin for HTML tags
-  const chunks = [];
-  let buf = html;
-  while (buf.length > MAX) {
-    chunks.push(buf.slice(0, MAX));
-    buf = buf.slice(MAX);
-  }
-  chunks.push(buf);
-
-  for (const chunk of chunks) {
-    try {
-      await logApi.sendMessage(LOG_CHANNEL, chunk, {
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-      });
-    } catch (e) {
-      // Don't crash the bot if logging fails (e.g. bot not admin / wrong channel)
-      console.error('⚠️ Log channel send failed:', e?.description || e?.message || e);
-      break;
-    }
-  }
-}
-
-function formatUser(store) {
-  if (!store) return 'Unknown';
-  const u = store.from || {};
-  const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || 'Unknown';
-  const uname = u.username ? `@${u.username}` : '';
-  const id = u.id ? String(u.id) : '';
-  return `${escapeHtml(name)} ${escapeHtml(uname)} <code>${escapeHtml(id)}</code>`.trim();
-}
-
-function formatChat(store) {
-  if (!store) return 'Unknown';
-  const c = store.chat || {};
-  const title = c.title || c.username || c.id || 'Unknown';
-  const type = c.type || '';
-  const id = c.id ? String(c.id) : '';
-  return `${escapeHtml(String(title))} ${type ? `(${escapeHtml(type)})` : ''} <code>${escapeHtml(id)}</code>`.trim();
-}
-
-// Log EVERY incoming command/callback
-bot.use(async (ctx, next) => {
-  const store = {
-    updateId: ctx.update?.update_id,
-    from: ctx.from,
-    chat: ctx.chat,
-    at: new Date().toISOString(),
-    updateType: ctx.update?.callback_query ? 'callback_query' : (ctx.message ? 'message' : 'update'),
-    text: ctx.message?.text,
-    data: ctx.update?.callback_query?.data,
-  };
-
-  return als.run(store, async () => {
-    try {
-      const isCommand = typeof store.text === 'string' && store.text.trim().startsWith('/');
-      const isCallback = typeof store.data === 'string' && store.data.length > 0;
-
-      if (isCommand || isCallback) {
-        const payload = isCommand ? store.text.trim() : store.data;
-        const kind = isCommand ? '📥 <b>COMMAND</b>' : '📥 <b>CALLBACK</b>';
-        const html =
-          `${kind}\n` +
-          `👤 <b>User:</b> ${formatUser(store)}\n` +
-          `💬 <b>Chat:</b> ${formatChat(store)}\n` +
-          `🕒 <b>Time:</b> <code>${escapeHtml(store.at)}</code>\n` +
-          `🧾 <b>Input:</b>\n<pre>${escapeHtml(payload)}</pre>`;
-        await sendLogText(html);
-      }
-    } catch (e) {
-      console.error('⚠️ Incoming log error:', e?.message || e);
-    }
-
-    return next();
+function _formatBotResponses(responses) {
+  if (!responses || responses.length === 0) return 'N/A';
+  // Keep it readable + avoid Telegram 4096 limit
+  const parts = responses.slice(0, 6).map((r, i) => {
+    const method = r.method || 'unknown';
+    const content = r.content || '';
+    return `• <b>${_escapeHtml(method)}</b>\n${_escapeHtml(content)}`;
   });
+  let out = parts.join('\n\n');
+  if (responses.length > 6) out += `\n\n… +${responses.length - 6} more`;
+  // hard cap
+  if (out.length > 3000) out = out.slice(0, 3000) + '…';
+  return out;
+}
+
+async function _sendUnifiedLogFromStore(store) {
+  try {
+    const ctx = store?.ctx;
+    if (!ctx) return;
+    const user = ctx.from || {};
+    const chat = ctx.chat || {};
+    const commandText = store.commandText || 'N/A';
+    const timeStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+    const logMessage = [
+      `🧾 <b>OSINT BOT LOG</b>`,
+      ``,
+      `👤 <b>User</b>`,
+      `• Name: ${_escapeHtml([user.first_name, user.last_name].filter(Boolean).join(' ') || 'N/A')}`,
+      `• Username: ${_escapeHtml(user.username ? '@' + user.username : 'N/A')}`,
+      `• ID: <code>${_escapeHtml(user.id)}</code>`,
+      ``,
+      `💬 <b>Chat</b>`,
+      `• Type: ${_escapeHtml(chat.type || 'N/A')}`,
+      `• Chat ID: <code>${_escapeHtml(chat.id)}</code>`,
+      ``,
+      `📥 <b>Command</b>`,
+      `• <code>${_escapeHtml(commandText)}</code>`,
+      ``,
+      `📤 <b>Bot Response</b>`,
+      _formatBotResponses(store.responses),
+      ``,
+      `🕒 <b>Time</b>: ${_escapeHtml(timeStr)}`
+    ].join('\n');
+
+    // prevent recursion: transformer must ignore this
+    store.suppressLog = true;
+    await ctx.api.sendMessage(LOG_CHANNEL, logMessage, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true
+    });
+  } catch (err) {
+    console.error('Unified log send error:', err?.message || err);
+  }
+}
+
+// Capture outgoing API calls as "responses"
+bot.api.config.use(async (prev, method, payload, signal) => {
+  const store = _als.getStore();
+  // Skip logging if it's the log message itself or we have no store
+  if (store && !store.suppressLog) {
+    try {
+      let content = '';
+      if (method === 'sendMessage' || method === 'editMessageText') {
+        content = payload?.text || '';
+      } else if (method === 'sendPhoto' || method === 'sendDocument' || method === 'sendVideo' || method === 'sendAnimation') {
+        content = payload?.caption || '';
+      } else if (method === 'answerCallbackQuery') {
+        content = payload?.text || '';
+      } else if (method === 'sendChatAction') {
+        content = payload?.action || '';
+      } else {
+        // other methods: store lightweight summary
+        content = JSON.stringify(payload || {}).slice(0, 500);
+      }
+
+      // Avoid huge spam
+      if (typeof content === 'string' && content.length > 1200) content = content.slice(0, 1200) + '…';
+
+      store.responses.push({ method, content });
+    } catch (_) {}
+  }
+  return prev(method, payload, signal);
 });
 
-// Log EVERY outgoing response (sendMessage/editMessageText/sendPhoto/etc.)
-bot.api.config.use(async (prev, method, payload, signal) => {
-  const store = als.getStore();
+// Wrap each update so responses are attached to that update and logged once at the end
+bot.use(async (ctx, next) => {
+  const inputText =
+    (ctx.message && ctx.message.text) ||
+    (ctx.callbackQuery && ctx.callbackQuery.data) ||
+    '';
 
-  // Avoid logging our own logs (and avoid recursion)
-  const targetChat = payload?.chat_id ?? payload?.to_chat_id;
-  const targetIsLogChannel =
-    targetChat === LOG_CHANNEL ||
-    String(targetChat || '') === String(LOG_CHANNEL || '') ||
-    (typeof LOG_CHANNEL === 'string' && typeof targetChat === 'string' && targetChat.toLowerCase() === LOG_CHANNEL.toLowerCase());
+  const isCommand = typeof inputText === 'string' && inputText.trim().startsWith('/');
+  const isCallback = !!ctx.callbackQuery;
 
-  // Call the real Telegram API first
-  const result = await prev(method, payload, signal);
+  // Only log commands/callbacks (not every random chat message)
+  if (!isCommand && !isCallback) return next();
 
-  try {
-    if (targetIsLogChannel) return result;
-
-    const shouldLog =
-      method === 'sendMessage' ||
-      method === 'editMessageText' ||
-      method === 'sendPhoto' ||
-      method === 'sendDocument' ||
-      method === 'sendVideo' ||
-      method === 'sendAudio' ||
-      method === 'sendAnimation' ||
-      method === 'sendSticker' ||
-      method === 'sendVoice' ||
-      method === 'sendPoll';
-
-    if (!shouldLog) return result;
-
-    let preview = '';
-    if (method === 'sendMessage' || method === 'editMessageText') {
-      preview = payload?.text || '';
-    } else if (method === 'sendPhoto' || method === 'sendVideo' || method === 'sendAnimation' || method === 'sendDocument' || method === 'sendAudio' || method === 'sendVoice') {
-      preview = payload?.caption || '';
-    } else if (method === 'sendSticker') {
-      preview = '[sticker]';
-    } else if (method === 'sendPoll') {
-      preview = payload?.question || '[poll]';
+  const store = { ctx, commandText: inputText.trim(), responses: [], suppressLog: false };
+  return _als.run(store, async () => {
+    try {
+      await next();
+    } finally {
+      // Don't log the log-channel messages (rare edge)
+      if (!store.suppressLog) await _sendUnifiedLogFromStore(store);
     }
-
-    const chatId = payload?.chat_id ?? payload?.to_chat_id ?? '';
-    const html =
-      `📤 <b>BOT RESPONSE</b>\n` +
-      `👤 <b>User:</b> ${formatUser(store)}\n` +
-      `💬 <b>Chat:</b> ${formatChat(store)}\n` +
-      `🎯 <b>To:</b> <code>${escapeHtml(String(chatId))}</code>\n` +
-      `🧩 <b>Method:</b> <code>${escapeHtml(method)}</code>\n` +
-      `📝 <b>Content:</b>\n<pre>${escapeHtml(String(preview || ''))}</pre>`;
-    await sendLogText(html);
-  } catch (e) {
-    console.error('⚠️ Outgoing log error:', e?.message || e);
-  }
-
-  return result;
+  });
 });
 
 
@@ -181,6 +147,7 @@ bot.api.config.use(async (prev, method, payload, signal) => {
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHANNEL_ID = -1003133803574; // Osint Updates (CONFIRMED)
 const CHANNEL_URL = 'https://t.me/OsintShitUpdates';
+const LOG_CHANNEL = process.env.LOG_CHANNEL || '@OsintLogsUpdates';
 
 // Admin Telegram IDs
 const ADMINS = [process.env.ADMIN_USER_ID];
