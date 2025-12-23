@@ -1019,97 +1019,6 @@ async function sendLongOrFile(ctx, text, filenamePrefix = 'output') {
   }
 }
 
-// ===============================
-// Fancy loading bar helper (3–4s)
-// ===============================
-function renderBar(pct) {
-  const total = 10;
-  const filled = Math.min(total, Math.max(0, Math.round((pct / 100) * total)));
-  const empty = total - filled;
-  return `[\`${'█'.repeat(filled)}${'░'.repeat(empty)}\`] ${pct}%`;
-}
-
-/**
- * Fancy loading bar (0% → 100%) that ALWAYS finishes within 5s (default ~3.8s),
- * then runs the task and only then sends the real response.
- *
- * Why: prevents "instant result while bar still running" and caps artificial wait time.
- */
-async function runWithLoading(ctx, title, taskFn, durationMs = 5000) {
-  const startedAt = Date.now();
-
-  // EXACT 5s loading bar (keeps edits low to avoid Telegram rate limits)
-  const totalMs = 5000;
-  const steps = 12; // 12 edits total => safe + smooth
-  const sent = await ctx.reply(
-    `⏳ *${title}*\n\n${renderBar(0)}`,
-    { parse_mode: 'Markdown' }
-  );
-
-  const chatId = sent.chat.id;
-  const messageId = sent.message_id;
-
-  // Animate to 100% BEFORE running taskFn (prevents result appearing early)
-  for (let i = 1; i <= steps; i++) {
-    const pct = Math.min(100, Math.round((i / steps) * 100));
-
-    // Sleep until the exact target timestamp for this step
-    const target = startedAt + Math.round((i * totalMs) / steps);
-    const delay = Math.max(0, target - Date.now());
-    await new Promise((r) => setTimeout(r, delay));
-
-    try {
-      await ctx.api.editMessageText(
-        chatId,
-        messageId,
-        `⏳ *${title}*\n\n${renderBar(pct)}`,
-        { parse_mode: 'Markdown' }
-      );
-    } catch (_) {
-      // ignore edit race / message deleted / throttling
-    }
-  }
-
-  // Now run the actual task (API call etc.)
-  let taskResult;
-  try {
-    taskResult = await taskFn();
-  } catch (err) {
-    const msg = (err && err.message) ? err.message : String(err);
-    taskResult = `❌ *${escapeMd(title)}* failed\n\n\`${escapeMd(msg)}\``;
-  }
-
-  // Duration shown includes the 5s bar + task time (so users see total)
-  const took = ((Date.now() - startedAt) / 1000).toFixed(2);
-
-  // Mark done (short)
-  try {
-    await ctx.api.editMessageText(
-      chatId,
-      messageId,
-      `✅ *${title}* — done in *${took}s*`,
-      { parse_mode: 'Markdown' }
-    );
-  } catch (_) {}
-
-  // Send the real response as a new message (safe for long outputs)
-  // taskFn can return:
-  //  - string (treated as Markdown)
-  //  - { text, longOk=true }  (uses sendLongOrFile)
-  if (typeof taskResult === 'string') {
-    return sendFormattedMessage(ctx, taskResult);
-  }
-  if (taskResult && typeof taskResult === 'object') {
-    const text = taskResult.text ?? '';
-    const useLong = taskResult.longOk !== false; // default true
-    if (useLong) return sendLongOrFile(ctx, text);
-    return sendFormattedMessage(ctx, text);
-  }
-  return;
-}
-
-
-
 
 // Helper function for admin notifications
 async function notifyUser(userId, message) {
@@ -1828,7 +1737,6 @@ bot.command('terabox', async (ctx) => {
 
 // OSINT Commands
 bot.command('ip', async (ctx) => {
-    return runWithLoading(ctx, '🌐 IP Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -1870,12 +1778,9 @@ bot.command('ip', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching IP information.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 bot.command('email', async (ctx) => {
-    return runWithLoading(ctx, '📧 Email Check', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -1922,12 +1827,9 @@ bot.command('email', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while validating email address.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 bot.command('num', async (ctx) => {
-    return runWithLoading(ctx, '📱 Number Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -1974,12 +1876,9 @@ bot.command('num', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up phone number.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 bot.command('basicnum', async (ctx) => {
-    return runWithLoading(ctx, '📞 Basic Number Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -2026,13 +1925,10 @@ bot.command('basicnum', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while getting basic number information.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 // UPDATED: Pakistani Government Number Information command
 bot.command('paknum', async (ctx) => {
-    return runWithLoading(ctx, '🇵🇰 Pakistan Number Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -2091,14 +1987,11 @@ bot.command('paknum', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani government number information.\n💳 1 credit refunded');
   }
-
-    });
 });
 // ===============================
 // INDIA POSTAL COMMANDS
 // ===============================
 bot.command('pincode', async (ctx) => {
-    return runWithLoading(ctx, '📮 Pincode Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -2133,12 +2026,9 @@ bot.command('pincode', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching pincode info.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 bot.command('postoffice', async (ctx) => {
-    return runWithLoading(ctx, '🏤 Post Office Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -2173,8 +2063,6 @@ bot.command('postoffice', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching post office info.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 // ===============================
@@ -2221,7 +2109,6 @@ bot.command('pak', async (ctx) => {
 // IFSC (TEXT, NOT JSON)
 // ===============================
 bot.command('ifsc', async (ctx) => {
-    return runWithLoading(ctx, '🏦 IFSC Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -2281,8 +2168,6 @@ bot.command('ifsc', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching IFSC info.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 // ===============================
@@ -2369,7 +2254,6 @@ bot.command('ig', async (ctx) => {
 });
 
 bot.command('bin', async (ctx) => {
-    return runWithLoading(ctx, '💳 BIN Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -2416,12 +2300,9 @@ bot.command('bin', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up BIN information.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 bot.command('vehicle', async (ctx) => {
-    return runWithLoading(ctx, '🚗 Vehicle Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -2468,12 +2349,9 @@ bot.command('vehicle', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching vehicle details.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 bot.command('ff', async (ctx) => {
-    return runWithLoading(ctx, '🎮 Free Fire Lookup', async () => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
     await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
@@ -2520,8 +2398,6 @@ bot.command('ff', async (ctx) => {
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching Free Fire statistics.\n💳 1 credit refunded');
   }
-
-    });
 });
 
 bot.command('myip', async (ctx) => {
