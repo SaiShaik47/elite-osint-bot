@@ -828,26 +828,22 @@ async function sendFormattedMessage(ctx, text) {
 }
 
 
-// Helper: if message is too long for Telegram, ALWAYS send as .txt file instead (no long-message spam)
+// Helper: if message is too long for Telegram, send as .txt file instead
 async function sendLongOrFile(ctx, text, filenamePrefix = 'output') {
   const safePrefix = (filenamePrefix || 'output')
     .toString()
     .replace(/[^a-zA-Z0-9_\-]+/g, '_')
     .slice(0, 40);
 
-  // Telegram message limit is 4096 chars. Keep buffer for Markdown parse.
-  const MAX_LEN = 3600;
+  // Telegram message limit is 4096 chars. Keep some buffer for Markdown parse.
+  const MAX_LEN = 3800;
 
-  const str = (text ?? '').toString();
-
-  // Short enough: send normally
-  if (str.length <= MAX_LEN) {
-    return sendFormattedMessage(ctx, str);
+  if ((text || '').length <= MAX_LEN) {
+    return sendFormattedMessage(ctx, text);
   }
 
-  // Long: send as document (.txt)
   const fileName = `${safePrefix}_${Date.now()}.txt`;
-  const buffer = Buffer.from(str, 'utf-8');
+  const buffer = Buffer.from(text, 'utf-8');
 
   try {
     await ctx.replyWithDocument(
@@ -855,15 +851,14 @@ async function sendLongOrFile(ctx, text, filenamePrefix = 'output') {
       { caption: '📄 Output was too long, so I sent it as a .txt file.' }
     );
   } catch (err) {
-    console.error('Failed to send .txt document:', err?.message || err);
-    // Last resort: tell user to retry (do NOT dump long text into chat)
-    await sendFormattedMessage(
-      ctx,
-      '❌ Output was too long and Telegram blocked the file upload. Please try again later.'
-    );
+    // Fallback: split into chunks if document upload fails
+    const plain = (text || '').toString();
+    for (let i = 0; i < plain.length; i += 3500) {
+      // eslint-disable-next-line no-await-in-loop
+      await ctx.reply(plain.slice(i, i + 3500));
+    }
   }
 }
-
 
 
 // Helper function for admin notifications
