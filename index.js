@@ -366,42 +366,70 @@ async function getFreeFireStats(uid) {
 
 
 // ===============================
-// RANDOM IBAN (randomiban.com)
+// RANDOM IBAN GENERATOR (randomiban.org)
+// NOTE: randomiban.com often redirects/blocks in server environments.
+// We use randomiban.org which returns a fresh IBAN in the HTML <title>.
 // ===============================
 async function getRandomIban(countryCode, count = 1) {
   try {
-    const cc = (countryCode || '').toString().trim().toUpperCase();
+    let cc = (countryCode || '').toString().trim().toUpperCase();
+
+    // common aliases
+    if (cc === 'UK') cc = 'GB';
+
     const nRaw = Number(count);
     const n = Number.isFinite(nRaw) ? Math.max(1, Math.min(10, Math.floor(nRaw))) : 1;
 
+    // If no country provided, pick a random supported country.
+    const supported = [
+      'AD','AE','AL','AT','AZ','BA','BE','BG','BH','BR','BY','CH','CR','CY','CZ','DE','DK','DO','EE','EG',
+      'ES','FI','FO','FR','GB','GE','GI','GL','GR','GT','HR','HU','IE','IL','IQ','IS','IT','JO','KW','KZ',
+      'LB','LC','LI','LT','LU','LV','MC','MD','ME','MK','MR','MT','MU','NL','NO','PK','PL','PS','PT','QA',
+      'RO','RS','SA','SC','SE','SI','SK','SM','SV','TL','TN','TR','UA','VG','XK'
+    ];
+    if (!cc) cc = supported[Math.floor(Math.random() * supported.length)];
+
+    // Helper: extract IBAN from HTML title like:
+    // "Random UK IBAN Generator Online | GB47LOYD51404492098660"
+    const extractIban = (html) => {
+      const titleMatch = String(html).match(/<title[^>]*>([^<]+)<\/title>/i);
+      if (titleMatch && titleMatch[1]) {
+        const t = titleMatch[1];
+        const pipe = t.split('|').pop();
+        if (pipe) {
+          const iban = pipe.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+          if (/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) return iban;
+        }
+      }
+      // fallback: try to find an IBAN-like token anywhere (may or may not exist)
+      const m = String(html).toUpperCase().match(/\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/);
+      return m ? m[0] : null;
+    };
+
     const out = [];
     for (let i = 0; i < n; i++) {
-      // randomiban.com sometimes has redirect chains; axios will follow them by default.
-      const url = cc ? `https://randomiban.com/?country=${encodeURIComponent(cc)}` : `https://randomiban.com/`;
+      const url = `https://www.randomiban.org/${encodeURIComponent(cc)}`;
       const res = await axios.get(url, {
         timeout: 20000,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; OsintBot/1.0; +https://t.me/OsintShitUpdates)',
+          'User-Agent': 'Mozilla/5.0 (compatible; OsintBot/1.0; +https://t.me/OsintLogsUpdates)',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
-        maxRedirects: 10,
+        maxRedirects: 5,
         validateStatus: (s) => s >= 200 && s < 400,
       });
 
-      const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      const html = res.data;
+      const iban = extractIban(html);
+      if (!iban) throw new Error('Failed to parse IBAN from randomiban.org response');
 
-      // Extract the first IBAN-like token.
-      const match = html.match(/\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/);
-      if (!match) {
-        throw new Error('Failed to parse IBAN from randomiban.com response');
-      }
-      out.push(match[0]);
+      out.push(iban);
     }
 
     return {
       success: true,
       data: {
-        source: 'randomiban.com',
+        source: 'randomiban.org',
         country: cc || null,
         count: out.length,
         ibans: out,
@@ -411,6 +439,7 @@ async function getRandomIban(countryCode, count = 1) {
     return { success: false, error: 'Failed to generate random IBAN(s)' };
   }
 }
+
 
 // ===============================
 // INDIA POSTAL (PINCODE / POST OFFICE)
@@ -2412,7 +2441,7 @@ async function handleIban(ctx) {
         `🌍 Country: \`${escapeMd((result.data.country || 'RANDOM').toString())}\`\n` +
         `🔢 Count: \`${escapeMd(String(result.data.count))}\`\n` +
         `🧩 Source: \`${escapeMd(result.data.source)}\`\n\n` +
-        '```json\n' + JSON.stringify(result.data, null, 2) + '\n```\n\n' +
+        `\\`\\`\\`json\n${JSON.stringify(result.data, null, 2)}\n\\`\\`\\`\n\n` +
         `• 1 credit deducted from your balance`;
 
       await sendFormattedMessage(ctx, response);
