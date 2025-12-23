@@ -31,49 +31,64 @@ function _escapeHtml(str) {
     .replace(/>/g, '&gt;');
 }
 
-function _formatBotResponses(responses) {
+function _formatBotResponsesScreenshot(responses) {
   if (!responses || responses.length === 0) return 'N/A';
-  // Keep it readable + avoid Telegram 4096 limit
-  const parts = responses.slice(0, 6).map((r, i) => {
+  const parts = responses.slice(0, 10).map((r) => {
     const method = r.method || 'unknown';
+    const to = r.to != null ? String(r.to) : 'N/A';
     const content = r.content || '';
-    return `• <b>${_escapeHtml(method)}</b>\n${_escapeHtml(content)}`;
+    return [
+      `📤 <b>BOT RESPONSE</b>`,
+      `👤 <b>User:</b> ${_escapeHtml(r.userLine || 'N/A')}`,
+      `💬 <b>Chat:</b> ${_escapeHtml(r.chatLine || 'N/A')}`,
+      `🎯 <b>To:</b> <code>${_escapeHtml(to)}</code>`,
+      `🧩 <b>Method:</b> ${_escapeHtml(method)}`,
+      `📝 <b>Content:</b>`,
+      `<pre>${_escapeHtml(content || 'N/A')}</pre>`
+    ].join('
+');
   });
-  let out = parts.join('\n\n');
-  if (responses.length > 6) out += `\n\n… +${responses.length - 6} more`;
-  // hard cap
-  if (out.length > 3000) out = out.slice(0, 3000) + '…';
+  let out = parts.join('
+
+');
+  if (responses.length > 10) out += `
+
+… +${responses.length - 10} more`;
+  // hard cap (Telegram limit ~4096 chars; keep margin)
+  if (out.length > 3500) out = out.slice(0, 3500) + '…';
   return out;
 }
+
 
 async function _sendUnifiedLogFromStore(store) {
   try {
     const ctx = store?.ctx;
     if (!ctx) return;
+
     const user = ctx.from || {};
     const chat = ctx.chat || {};
     const commandText = store.commandText || 'N/A';
-    const timeStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    const timeISO = new Date().toISOString();
+
+    const userLine = `${[user.first_name, user.last_name].filter(Boolean).join(' ') || 'N/A'} ${user.username ? '@' + user.username : 'N/A'} ${user.id ?? 'N/A'}`;
+    const chatName = (chat.title || chat.username || chat.first_name || chat.id || 'N/A');
+    const chatLine = `${chatName} (${chat.type || 'N/A'}) ${chat.id ?? 'N/A'}`;
+
+    // attach these lines to each response for the screenshot style
+    for (const r of (store.responses || [])) {
+      if (!r.userLine) r.userLine = userLine;
+      if (!r.chatLine) r.chatLine = chatLine;
+    }
 
     const logMessage = [
-      `🧾 <b>OSINT BOT LOG</b>`,
+      `📥 <b>COMMAND</b>`,
+      `👤 <b>User:</b> ${_escapeHtml(userLine)}`,
+      `💬 <b>Chat:</b> ${_escapeHtml(chatLine)}`,
+      `🕒 <b>Time:</b> ${_escapeHtml(timeISO)}`,
+      `📄 <b>Input:</b>`,
+      `<pre>${_escapeHtml(commandText)}</pre>`,
       ``,
-      `👤 <b>User</b>`,
-      `• Name: ${_escapeHtml([user.first_name, user.last_name].filter(Boolean).join(' ') || 'N/A')}`,
-      `• Username: ${_escapeHtml(user.username ? '@' + user.username : 'N/A')}`,
-      `• ID: <code>${_escapeHtml(user.id)}</code>`,
-      ``,
-      `💬 <b>Chat</b>`,
-      `• Type: ${_escapeHtml(chat.type || 'N/A')}`,
-      `• Chat ID: <code>${_escapeHtml(chat.id)}</code>`,
-      ``,
-      `📥 <b>Command</b>`,
-      `• <code>${_escapeHtml(commandText)}</code>`,
-      ``,
-      `📤 <b>Bot Response</b>`,
-      _formatBotResponses(store.responses),
-      ``,
-      `🕒 <b>Time</b>: ${_escapeHtml(timeStr)}`
+      _formatBotResponsesScreenshot(store.responses),
     ].join('\n');
 
     // prevent recursion: transformer must ignore this
@@ -88,6 +103,7 @@ async function _sendUnifiedLogFromStore(store) {
 }
 
 // Capture outgoing API calls as "responses"
+ as "responses"
 bot.api.config.use(async (prev, method, payload, signal) => {
   const store = _als.getStore();
   // Skip logging if it's the log message itself or we have no store
@@ -110,7 +126,8 @@ bot.api.config.use(async (prev, method, payload, signal) => {
       // Avoid huge spam
       if (typeof content === 'string' && content.length > 1200) content = content.slice(0, 1200) + '…';
 
-      store.responses.push({ method, content });
+      const to = (payload && (payload.chat_id ?? payload.to ?? payload.user_id ?? payload.from_chat_id)) ?? 'N/A';
+      store.responses.push({ method, content, to });
     } catch (_) {}
   }
   return prev(method, payload, signal);
