@@ -1030,17 +1030,16 @@ function renderBar(pct) {
 }
 
 /**
- * Runs a task while showing a fancy loading bar that reaches 100% in ~3.5s,
- * then replies with the real result.
+ * Fancy loading bar (0% → 100%) that ALWAYS finishes within 5s (default ~3.8s),
+ * then runs the task and only then sends the real response.
  *
- * Usage:
- *   return runWithLoading(ctx, "🌐 IP Lookup", async () => {
- *     ... do work ...
- *     return { text: "final markdown", fileFallback: true };
- *   });
+ * Why: prevents "instant result while bar still running" and caps artificial wait time.
  */
-async function runWithLoading(ctx, title, taskFn, durationMs = 3500) {
+async function runWithLoading(ctx, title, taskFn, durationMs = 3800) {
   const startedAt = Date.now();
+
+  // Hard cap so it never drags on
+  const totalMs = Math.min(Math.max(Number(durationMs) || 3800, 1500), 5000);
 
   // Send initial loading message
   const sent = await ctx.reply(
@@ -1051,16 +1050,10 @@ async function runWithLoading(ctx, title, taskFn, durationMs = 3500) {
   const chatId = sent.chat.id;
   const messageId = sent.message_id;
 
-  // Start task immediately
-  let taskResult;
-  const taskPromise = (async () => {
-    taskResult = await taskFn();
-    return taskResult;
-  })();
+  // Animate bar to 100% first (this is the "rate limiting / premium feel" delay)
+  const steps = 12; // smooth enough, not too many edit calls
+  const stepMs = Math.max(120, Math.floor(totalMs / steps));
 
-  // Animate bar to 100% over durationMs
-  const steps = 14; // ~250ms updates
-  const stepMs = Math.floor(durationMs / steps);
   for (let i = 1; i <= steps; i++) {
     await new Promise((r) => setTimeout(r, stepMs));
     const pct = Math.min(100, Math.round((i / steps) * 100));
@@ -1076,8 +1069,22 @@ async function runWithLoading(ctx, title, taskFn, durationMs = 3500) {
     }
   }
 
-  // Ensure task is finished
-  await taskPromise;
+  // NOW run the task (so results won't appear before the bar is finished)
+  let taskResult;
+  try {
+    taskResult = await taskFn();
+  } catch (err) {
+    const took = ((Date.now() - startedAt) / 1000).toFixed(2);
+    try {
+      await ctx.api.editMessageText(
+        chatId,
+        messageId,
+        `❌ *${title}* — failed in *${took}s*`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (_) {}
+    throw err;
+  }
 
   const took = ((Date.now() - startedAt) / 1000).toFixed(2);
 
@@ -1091,7 +1098,7 @@ async function runWithLoading(ctx, title, taskFn, durationMs = 3500) {
     );
   } catch (_) {}
 
-  // Now send the real response as a new message (safe for long outputs)
+  // Send the real response as a new message (safe for long outputs)
   // taskFn can return:
   //  - string (treated as Markdown)
   //  - { text, longOk=true }  (uses sendLongOrFile)
