@@ -197,6 +197,11 @@ const registeredUsers = new Set(); // Track users who have completed registratio
 // Redeem code storage (in-memory; resets on restart)
 // code -> { credits, maxUses, uses, redeemedBy:Set<string>, createdBy, createdAt, expiresAt }
 const redeemCodes = new Map();
+// Storage for revoke/expired/used-up codes (for stats & safety)
+const revokedCodes = new Set(); // normalized codes revoked by admin
+const expiredCodes = new Set(); // normalized codes expired and cleaned up
+const usedUpCodes = new Set();
+const redeemStats = { generated: 0, redeemed: 0 };  // normalized codes that hit maxUses
 const adminId = process.env.ADMIN_USER_ID;
 
 // Maintenance mode flag (stored in memory, will reset on bot restart)
@@ -1002,7 +1007,10 @@ function normalizeCode(input = '') {
 function cleanupExpiredCodes() {
   const now = Date.now();
   for (const [k, v] of redeemCodes.entries()) {
-    if (v?.expiresAt && now > v.expiresAt) redeemCodes.delete(k);
+    if (v?.expiresAt && now > v.expiresAt) {
+      redeemCodes.delete(k);
+      expiredCodes.add(k);
+    }
   }
 }
 
@@ -2716,6 +2724,8 @@ bot.command('admin', async (ctx) => {
 • /setcredits <user_id> <amount> - 🎯 Set exact credit amount
 • /gencode <credits> [maxUses] [expiresHours] - 🎟️ Generate redeem code
 • /gencodebulk <count> <credits> [maxUses] [expiresHours] - 🎟️ Generate multiple codes
+• /revoke <code> - 🧨 Revoke a code
+• /codesstats - 📊 Codes stats
 
 👑 👥 User Management:
 • /premium <user_id> - ⭐ Toggle premium status
@@ -2822,7 +2832,9 @@ bot.command('gencode', async (ctx) => {
     expiresAt
   });
 
-  const exp = new Date(expiresAt).toISOString();
+    redeemStats.generated += 1;
+
+const exp = new Date(expiresAt).toISOString();
   const msg =
 `🎟️ *Redeem Code Generated*
 
@@ -2840,6 +2852,15 @@ ${codeStr}
 
 ⚠️ Note: Codes are stored in memory (reset on bot restart).`;
   await sendFormattedMessage(ctx, msg);
+
+  // Auto-log generated code to admin channel
+  await sendLogText(
+    `🎟️ <b>/gencode</b>\n` +
+    `👤 <b>Admin:</b> ${escapeHTML(ctx.from?.first_name || '')} (<code>${escapeHTML(telegramId)}</code>)\n` +
+    `🎁 <b>Credits:</b> <b>${credits}</b> | 👥 <b>Max uses:</b> <b>${maxUses}</b> | ⏳ <b>Expires:</b> <b>${expiresHours}h</b>\n` +
+    `🎟️ <b>Code:</b> <code>${escapeHTML(codeStr)}</code>`
+  );
+
 });
 
 
@@ -2903,13 +2924,31 @@ bot.command('gencodebulk', async (ctx) => {
     codes.push(codeStr);
   }
 
-  const msg = `✅ Generated ${codes.length} redeem codes\n\n` +
-              codes.map(c => `• <code>${c}</code>`).join('\n') +
-              `\n\n🎁 Credits per redeem: <b>${credits}</b>` +
-              `\n👥 Max uses per code: <b>${maxUses}</b>` +
-              `\n⏳ Expires in: <b>${expiresHours}h</b>`;
+  const lines = codes.map((c, i) => `${String(i + 1).padStart(3, '0')}. ${c}`);
+  redeemStats.generated += codes.length;
+
+  const msg =
+`✅ *Bulk codes generated*
+📦 Count: *${codes.length}* | 🎁 Credits: *${credits}* | 👥 Max uses: *${maxUses}* | ⏳ Expires: *${expiresHours}h*
+
+\`\`\`
+${lines.join('\n')}
+\`\`\`
+
+🧨 /revoke <code>
+📊 /codesstats
+🎟️ /redeem <code>`;
 
   await sendFormattedMessage(ctx, msg);
+
+  // Auto-log bulk generated codes to admin channel
+  await sendLogText(
+    `📦 <b>/gencodebulk</b>\n` +
+    `👤 <b>Admin:</b> ${escapeHTML(ctx.from?.first_name || '')} (<code>${escapeHTML(telegramId)}</code>)\n` +
+    `🔢 <b>Count:</b> <b>${codes.length}</b> | 🎁 <b>Credits:</b> <b>${credits}</b> | 👥 <b>Max uses:</b> <b>${maxUses}</b> | ⏳ <b>Expires:</b> <b>${expiresHours}h</b>\n` +
+    `🎟️ <b>Codes:</b>\n<pre>${escapeHTML(codes.join('\n'))}</pre>`
+  );
+
 });
 
 bot.command('redeem', async (ctx) => {
@@ -2932,6 +2971,12 @@ bot.command('redeem', async (ctx) => {
     return;
   }
 
+  // Block revoked codes
+  if (revokedCodes.has(codeInput)) {
+    await sendFormattedMessage(ctx, '⛔ This code has been revoked by an admin.');
+    return;
+  }
+
   const entry = redeemCodes.get(codeInput);
   if (!entry) {
     await sendFormattedMessage(ctx, '❌ Invalid or expired code.');
@@ -2941,6 +2986,7 @@ bot.command('redeem', async (ctx) => {
   const now = Date.now();
   if (entry.expiresAt && now > entry.expiresAt) {
     redeemCodes.delete(codeInput);
+    expiredCodes.add(codeInput);
     await sendFormattedMessage(ctx, '❌ This code has expired.');
     return;
   }
@@ -2953,16 +2999,21 @@ bot.command('redeem', async (ctx) => {
 
   if (entry.uses >= entry.maxUses) {
     redeemCodes.delete(codeInput);
+    usedUpCodes.add(codeInput);
     await sendFormattedMessage(ctx, '❌ This code has already been fully used.');
     return;
   }
 
   user.credits = (user.credits || 0) + entry.credits;
   entry.uses += 1;
+  redeemStats.redeemed += 1;
   entry.redeemedBy?.add(user.telegramId);
 
   // Auto-delete when fully used
-  if (entry.uses >= entry.maxUses) redeemCodes.delete(codeInput);
+  if (entry.uses >= entry.maxUses) {
+    redeemCodes.delete(codeInput);
+    usedUpCodes.add(codeInput);
+  }
 
   const msg =
 `✅ *Code Redeemed Successfully!*
@@ -2974,6 +3025,83 @@ bot.command('redeem', async (ctx) => {
 ✨ Enjoy!`;
   await sendFormattedMessage(ctx, msg);
 });
+// Admin: /revoke <code>
+bot.command('revoke', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const raw = (ctx.match?.toString() || '').trim();
+  const codeKey = normalizeCode(raw);
+
+  if (!codeKey) {
+    await sendFormattedMessage(ctx, '🧨 Usage: /revoke <code>\n\nExample: /revoke FUCK-ABCDE-123-SAKE');
+    return;
+  }
+
+  let existed = false;
+  if (redeemCodes.has(codeKey)) {
+    redeemCodes.delete(codeKey);
+    existed = true;
+  }
+
+  revokedCodes.add(codeKey);
+
+  // If it was previously tracked elsewhere, keep those stats but it's now revoked.
+  const msg = existed
+    ? `✅ Code revoked: \`${raw}\``
+    : `✅ Code marked as revoked (even if not found/was expired): \`${raw}\``;
+
+  await sendFormattedMessage(ctx, msg);
+
+  // Auto-log
+  await sendLogText(
+    `🧨 <b>/revoke</b>\n` +
+    `👤 <b>Admin:</b> ${escapeHTML(ctx.from?.first_name || '')} (<code>${escapeHTML(telegramId)}</code>)\n` +
+    `🎟️ <b>Code:</b> <code>${escapeHTML(raw)}</code>\n` +
+    `✅ <b>Status:</b> ${existed ? 'Removed & revoked' : 'Revoked only'}`
+  );
+});
+
+// Admin: /codesstats
+bot.command('codesstats', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  const now = Date.now();
+  let active = 0;
+  let expInMap = 0;
+  let totalUsesActive = 0;
+
+  for (const [k, v] of redeemCodes.entries()) {
+    const isExpired = v?.expiresAt && now > v.expiresAt;
+    if (isExpired) expInMap += 1;
+    else if ((v?.uses || 0) < (v?.maxUses || 1)) active += 1;
+    totalUsesActive += (v?.uses || 0);
+  }
+
+  // Note: some expired/used-up codes are removed during cleanup/redeem and tracked in sets.
+  const totalGenerated = redeemStats.generated || (redeemCodes.size + revokedCodes.size + expiredCodes.size + usedUpCodes.size);
+  const text =
+`📊 *Redeem Codes Stats*
+
+🎟️ Total Generated: *${totalGenerated}*
+✅ Active: *${active}*
+⌛ Expired (tracked): *${expiredCodes.size}*
+⛔ Revoked: *${revokedCodes.size}*
+📛 Used Up (tracked): *${usedUpCodes.size}*
+
+👥 Total Redeems (tracked): *${redeemStats.redeemed}*
+🧾 Active-map redeems: *${totalUsesActive}*`;
+
+  await sendFormattedMessage(ctx, text);
+});
+
 
 bot.command('give', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
