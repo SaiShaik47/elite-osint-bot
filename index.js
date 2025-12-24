@@ -980,13 +980,19 @@ function isAdmin(userId) {
 // ===============================
 // REDEEM CODE HELPERS
 // ===============================
-function generateRedeemCode(length = 12) {
-  // Uppercase + digits, no confusing chars (O/0, I/1)
+function generateRedeemCode() {
+  // Format required: FUCK-XXXXX-XXX-SAKE
+  // Uses uppercase A-Z + digits, excluding confusing chars (O/0, I/1)
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const bytes = crypto.randomBytes(length);
-  let out = '';
-  for (let i = 0; i < length; i++) out += alphabet[bytes[i] % alphabet.length];
-  return out;
+
+  const chunk = (len) => {
+    const bytes = crypto.randomBytes(len);
+    let out = '';
+    for (let i = 0; i < len; i++) out += alphabet[bytes[i] % alphabet.length];
+    return out;
+  };
+
+  return `FUCK-${chunk(5)}-${chunk(3)}-SAKE`;
 }
 
 function normalizeCode(input = '') {
@@ -2708,6 +2714,8 @@ bot.command('admin', async (ctx) => {
 • /giveall <amount> - 🌍 Bless all users with credits
 • /removeall <amount> - 🗑️ Clear credits from all users
 • /setcredits <user_id> <amount> - 🎯 Set exact credit amount
+• /gencode <credits> [maxUses] [expiresHours] - 🎟️ Generate redeem code
+• /gencodebulk <count> <credits> [maxUses] [expiresHours] - 🎟️ Generate multiple codes
 
 👑 👥 User Management:
 • /premium <user_id> - ⭐ Toggle premium status
@@ -2780,7 +2788,7 @@ bot.command('gencode', async (ctx) => {
   const expiresHours = parts[2] ? parseInt(parts[2], 10) : 168; // 7 days default
 
   if (!Number.isFinite(credits) || credits <= 0) {
-    await sendFormattedMessage(ctx, '🎟️ Usage: /gencode <credits> [maxUses] [expiresHours]\n\nExample: /gencode 50 1 168');
+    await sendFormattedMessage(ctx, '🎟️ Usage: /gencode <credits> [maxUses] [expiresHours]\n\nExample: /gencode 50 1 168\n\nCode format: FUCK-XXXXX-XXX-SAKE');
     return;
   }
   if (!Number.isFinite(maxUses) || maxUses <= 0 || maxUses > 1000) {
@@ -2793,13 +2801,18 @@ bot.command('gencode', async (ctx) => {
   }
 
   // Make code unique
-  let codeStr = generateRedeemCode(12);
-  for (let i = 0; i < 5 && redeemCodes.has(codeStr); i++) codeStr = generateRedeemCode(12);
+  let codeStr = generateRedeemCode();
+  let codeKey = normalizeCode(codeStr);
+  for (let i = 0; i < 10 && redeemCodes.has(codeKey); i++) {
+    codeStr = generateRedeemCode();
+    codeKey = normalizeCode(codeStr);
+  }
 
   const now = Date.now();
   const expiresAt = now + expiresHours * 60 * 60 * 1000;
 
-  redeemCodes.set(codeStr, {
+  redeemCodes.set(codeKey, {
+    displayCode: codeStr,
     credits,
     maxUses,
     uses: 0,
@@ -2829,6 +2842,76 @@ ${codeStr}
   await sendFormattedMessage(ctx, msg);
 });
 
+
+// Admin: /gencodebulk <count> <credits> [maxUses] [expiresHours]
+bot.command('gencodebulk', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  cleanupExpiredCodes();
+
+  const parts = (ctx.match?.toString() || '').trim().split(/\s+/).filter(Boolean);
+
+  const count = Number(parts[0]);
+  const credits = Number(parts[1]);
+  const maxUses = parts[2] ? Number(parts[2]) : 1;
+  const expiresHours = parts[3] ? Number(parts[3]) : 168; // default 7 days
+
+  if (!Number.isFinite(count) || count <= 0 || count > 25) {
+    await sendFormattedMessage(ctx, '🎟️ Usage: /gencodebulk <count> <credits> [maxUses] [expiresHours]\n\nExample: /gencodebulk 10 50 1 168\n\nMax count: 25');
+    return;
+  }
+  if (!Number.isFinite(credits) || credits <= 0) {
+    await sendFormattedMessage(ctx, '🎟️ Usage: /gencodebulk <count> <credits> [maxUses] [expiresHours]\n\nExample: /gencodebulk 10 50 1 168');
+    return;
+  }
+  if (!Number.isFinite(maxUses) || maxUses <= 0 || maxUses > 1000) {
+    await sendFormattedMessage(ctx, '❌ maxUses must be between 1 and 1000.');
+    return;
+  }
+  if (!Number.isFinite(expiresHours) || expiresHours <= 0 || expiresHours > 8760) {
+    await sendFormattedMessage(ctx, '❌ expiresHours must be between 1 and 8760 (1 year).');
+    return;
+  }
+
+  const now = Date.now();
+  const expiresAt = now + expiresHours * 60 * 60 * 1000;
+
+  const codes = [];
+  for (let n = 0; n < count; n++) {
+    let codeStr = generateRedeemCode();
+    let codeKey = normalizeCode(codeStr);
+    for (let i = 0; i < 10 && redeemCodes.has(codeKey); i++) {
+      codeStr = generateRedeemCode();
+      codeKey = normalizeCode(codeStr);
+    }
+
+    redeemCodes.set(codeKey, {
+      displayCode: codeStr,
+      credits,
+      maxUses,
+      uses: 0,
+      redeemedBy: new Set(),
+      createdBy: telegramId,
+      createdAt: now,
+      expiresAt
+    });
+
+    codes.push(codeStr);
+  }
+
+  const msg = `✅ Generated ${codes.length} redeem codes\n\n` +
+              codes.map(c => `• <code>${c}</code>`).join('\n') +
+              `\n\n🎁 Credits per redeem: <b>${credits}</b>` +
+              `\n👥 Max uses per code: <b>${maxUses}</b>` +
+              `\n⏳ Expires in: <b>${expiresHours}h</b>`;
+
+  await sendFormattedMessage(ctx, msg);
+});
+
 bot.command('redeem', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user) return;
@@ -2845,7 +2928,7 @@ bot.command('redeem', async (ctx) => {
   const codeInput = normalizeCode(raw);
 
   if (!codeInput) {
-    await sendFormattedMessage(ctx, '🎟️ Usage: /redeem <code>\n\nExample: /redeem ABCD-EFGH-1234');
+    await sendFormattedMessage(ctx, '🎟️ Usage: /redeem <code>\n\nExample: /redeem FUCK-ABCDE-123-SAKE');
     return;
   }
 
