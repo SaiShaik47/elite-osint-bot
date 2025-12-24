@@ -1,5 +1,6 @@
 const { Bot, InlineKeyboard, Api } = require('grammy');
 const axios = require('axios');
+const crypto = require('crypto');
 
 // Load environment variables
 require('dotenv').config();
@@ -192,6 +193,10 @@ const users = new Map();
 const registrationRequests = new Map();
 const verifiedUsers = new Set(); // Track users who have verified channel membership
 const registeredUsers = new Set(); // Track users who have completed registration
+
+// Redeem code storage (in-memory; resets on restart)
+// code -> { credits, maxUses, uses, redeemedBy:Set<string>, createdBy, createdAt, expiresAt }
+const redeemCodes = new Map();
 const adminId = process.env.ADMIN_USER_ID;
 
 // Maintenance mode flag (stored in memory, will reset on bot restart)
@@ -970,6 +975,29 @@ function getOrCreateUser(ctx) {
 function isAdmin(userId) {
   const user = users.get(userId);
   return user && (user.isAdmin || userId === adminId);
+}
+
+// ===============================
+// REDEEM CODE HELPERS
+// ===============================
+function generateRedeemCode(length = 12) {
+  // Uppercase + digits, no confusing chars (O/0, I/1)
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.randomBytes(length);
+  let out = '';
+  for (let i = 0; i < length; i++) out += alphabet[bytes[i] % alphabet.length];
+  return out;
+}
+
+function normalizeCode(input = '') {
+  return String(input).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function cleanupExpiredCodes() {
+  const now = Date.now();
+  for (const [k, v] of redeemCodes.entries()) {
+    if (v?.expiresAt && now > v.expiresAt) redeemCodes.delete(k);
+  }
 }
 
 // Helper function to send formatted messages
@@ -2732,6 +2760,138 @@ bot.command('admin', async (ctx) => {
 });
 
 // Credit Management Commands
+// ===============================
+// REDEEM CODES
+// ===============================
+// Admin: /gencode <credits> [maxUses] [expiresHours]
+// User:  /redeem <code>
+bot.command('gencode', async (ctx) => {
+  const telegramId = ctx.from?.id.toString();
+  if (!telegramId || !isAdmin(telegramId)) {
+    await sendFormattedMessage(ctx, '❌ This command is only available to administrators.');
+    return;
+  }
+
+  cleanupExpiredCodes();
+
+  const parts = (ctx.match?.toString() || '').trim().split(/\s+/).filter(Boolean);
+  const credits = parseInt(parts[0] || '', 10);
+  const maxUses = parts[1] ? parseInt(parts[1], 10) : 1;
+  const expiresHours = parts[2] ? parseInt(parts[2], 10) : 168; // 7 days default
+
+  if (!Number.isFinite(credits) || credits <= 0) {
+    await sendFormattedMessage(ctx, '🎟️ Usage: /gencode <credits> [maxUses] [expiresHours]\n\nExample: /gencode 50 1 168');
+    return;
+  }
+  if (!Number.isFinite(maxUses) || maxUses <= 0 || maxUses > 1000) {
+    await sendFormattedMessage(ctx, '❌ maxUses must be between 1 and 1000.');
+    return;
+  }
+  if (!Number.isFinite(expiresHours) || expiresHours <= 0 || expiresHours > 8760) {
+    await sendFormattedMessage(ctx, '❌ expiresHours must be between 1 and 8760 (1 year).');
+    return;
+  }
+
+  // Make code unique
+  let codeStr = generateRedeemCode(12);
+  for (let i = 0; i < 5 && redeemCodes.has(codeStr); i++) codeStr = generateRedeemCode(12);
+
+  const now = Date.now();
+  const expiresAt = now + expiresHours * 60 * 60 * 1000;
+
+  redeemCodes.set(codeStr, {
+    credits,
+    maxUses,
+    uses: 0,
+    redeemedBy: new Set(),
+    createdBy: telegramId,
+    createdAt: now,
+    expiresAt
+  });
+
+  const exp = new Date(expiresAt).toISOString();
+  const msg =
+`🎟️ *Redeem Code Generated*
+
+\`\`\`
+${codeStr}
+\`\`\`
+
+💰 *Credits:* +${credits}
+👥 *Max Uses:* ${maxUses}
+⏳ *Expires:* ${exp}
+👑 *By:* @${escapeMd(ctx.from?.username || 'admin')}
+
+✅ Share this code with users:
+• They redeem with: \`/redeem ${codeStr}\`
+
+⚠️ Note: Codes are stored in memory (reset on bot restart).`;
+  await sendFormattedMessage(ctx, msg);
+});
+
+bot.command('redeem', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user) return;
+
+  // Optional: require approval before redeeming
+  if (!user.isApproved && !user.isAdmin) {
+    await sendFormattedMessage(ctx, '❌ Your account is not approved yet.\n\n✅ Register first: /register');
+    return;
+  }
+
+  cleanupExpiredCodes();
+
+  const raw = (ctx.match?.toString() || '').trim();
+  const codeInput = normalizeCode(raw);
+
+  if (!codeInput) {
+    await sendFormattedMessage(ctx, '🎟️ Usage: /redeem <code>\n\nExample: /redeem ABCD-EFGH-1234');
+    return;
+  }
+
+  const entry = redeemCodes.get(codeInput);
+  if (!entry) {
+    await sendFormattedMessage(ctx, '❌ Invalid or expired code.');
+    return;
+  }
+
+  const now = Date.now();
+  if (entry.expiresAt && now > entry.expiresAt) {
+    redeemCodes.delete(codeInput);
+    await sendFormattedMessage(ctx, '❌ This code has expired.');
+    return;
+  }
+
+  // Prevent same user redeeming same code multiple times
+  if (entry.redeemedBy?.has(user.telegramId)) {
+    await sendFormattedMessage(ctx, '⚠️ You already redeemed this code.');
+    return;
+  }
+
+  if (entry.uses >= entry.maxUses) {
+    redeemCodes.delete(codeInput);
+    await sendFormattedMessage(ctx, '❌ This code has already been fully used.');
+    return;
+  }
+
+  user.credits = (user.credits || 0) + entry.credits;
+  entry.uses += 1;
+  entry.redeemedBy?.add(user.telegramId);
+
+  // Auto-delete when fully used
+  if (entry.uses >= entry.maxUses) redeemCodes.delete(codeInput);
+
+  const msg =
+`✅ *Code Redeemed Successfully!*
+
+🎟️ *Code:* \`${codeInput}\`
+💰 *Credits Added:* +${entry.credits}
+💳 *New Balance:* ${user.credits} credits
+
+✨ Enjoy!`;
+  await sendFormattedMessage(ctx, msg);
+});
+
 bot.command('give', async (ctx) => {
   const telegramId = ctx.from?.id.toString();
   
