@@ -375,33 +375,9 @@ async function getTelegramIdInfo(tgId) {
   try {
     const response = await axios.get(
       `https://meowmeow.rf.gd/gand/unkownrandi.php?tg=${encodeURIComponent(tgId)}`,
-      {
-        timeout: 20000,
-        headers: {
-          // Some free hosts return HTML "JS challenge" unless a normal UA is provided.
-          // This does NOT bypass any protection; it just avoids being treated as a bot by default.
-          'User-Agent': 'Mozilla/5.0 (compatible; TelegramBot/1.0; +https://core.telegram.org/bots/api)',
-          'Accept': 'application/json,text/plain,*/*'
-        },
-        validateStatus: (s) => s >= 200 && s < 500
-      }
+      { timeout: 20000 }
     );
-
-    const data = response.data;
-
-    // If the host returns an HTML/JS challenge page, treat it as a failure.
-    if (typeof data === 'string') {
-      const s = data.toLowerCase();
-      if (s.includes('<html') || s.includes('document.cookie') || s.includes('aes.js') || s.includes('__test=')) {
-        return {
-          success: false,
-          error: 'Provider returned a JS challenge/HTML page instead of JSON. This endpoint is blocking server-side requests.'
-        };
-      }
-    }
-
-    // If it's JSON (object/array), return it directly.
-    return { success: true, data };
+    return { success: true, data: response.data };
   } catch (error) {
     return { success: false, error: 'Failed to fetch Telegram info' };
   }
@@ -2366,112 +2342,32 @@ bot.command('igreels', async (ctx) => {
     return;
   }
 
-  const usernameRaw = (ctx.match ?? ctx.message?.text?.split(' ').slice(1).join(' ')) || '';
-  const username = usernameRaw.toString().trim();
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const username = ctx.match;
   if (!username) {
     await sendFormattedMessage(ctx, '🎞️ Usage: /igreels <Instagram username>\n\nExample: /igreels indiangamedevv');
     return;
   }
 
-  if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need 1 credit to use this command.\n💳 Check your balance with /credits');
-    return;
-  }
+  await sendFormattedMessage(ctx, '🎞️ Fetching Instagram reels/posts...');
 
   try {
-    const result = await getInstagramPosts(username);
-
-    // Try to find an array of posts/items inside whatever the provider returns.
-    const pickArray = (obj) => {
-      if (!obj) return null;
-      if (Array.isArray(obj)) return obj;
-      if (Array.isArray(obj.items)) return obj.items;
-      if (Array.isArray(obj.data)) return obj.data;
-      if (Array.isArray(obj.posts)) return obj.posts;
-      if (obj.result && Array.isArray(obj.result)) return obj.result;
-      if (obj.result && Array.isArray(obj.result.items)) return obj.result.items;
-      return null;
-    };
+    const result = await getInstagramPosts(username.toString());
 
     if (result.success && result.data) {
-      const arr = pickArray(result.data) || [];
-      if (!Array.isArray(arr) || arr.length === 0) {
-        // Fallback: still show JSON, but inform user structure changed.
-        const response = `🎞️ Instagram Reels/Posts for @${username}\n\n⚠️ Provider returned an unexpected structure (no items array found).\n\n\\`\\`\\`json\n${JSON.stringify(result.data, null, 2)}\n\\`\\`\\`\n\n• 1 credit deducted from your balance`;
-        await sendFormattedMessage(ctx, response);
-        user.totalQueries++;
-        return;
-      }
+      const response = `🎞️ Instagram Reels / Posts Results 🎞️
 
-      const top = arr.slice(0, 5);
+\`\`\`json
+${JSON.stringify(result.data, null, 2)}
+\`\`\`
 
-      const safeStr = (v, max = 120) => {
-        if (v === null || v === undefined) return '';
-        const s = String(v).replace(/\s+/g, ' ').trim();
-        return s.length > max ? s.slice(0, max - 1) + '…' : s;
-      };
+• 1 credit deducted from your balance`;
 
-      const getLink = (p) => {
-        return (
-          p.permalink ||
-          p.url ||
-          p.link ||
-          p.postUrl ||
-          (p.shortcode ? `https://www.instagram.com/p/${p.shortcode}/` : null) ||
-          (p.code ? `https://www.instagram.com/p/${p.code}/` : null) ||
-          null
-        );
-      };
-
-      const getCaption = (p) => {
-        return p.caption?.text || p.caption || p.text || p.title || '';
-      };
-
-      const getStats = (p) => {
-        const likes = p.like_count ?? p.likes ?? p.likesCount ?? p.likeCount;
-        const comments = p.comment_count ?? p.comments ?? p.commentsCount ?? p.commentCount;
-        const views = p.view_count ?? p.views ?? p.play_count ?? p.plays;
-        return { likes, comments, views };
-      };
-
-      const getDate = (p) => {
-        const ts = p.taken_at ?? p.timestamp ?? p.created_at ?? p.createdAt ?? p.date;
-        if (!ts) return '';
-        // If epoch seconds/millis:
-        const n = Number(ts);
-        if (!Number.isNaN(n) && n > 0) {
-          const ms = n > 1e12 ? n : n * 1000;
-          const d = new Date(ms);
-          if (!Number.isNaN(d.getTime())) return d.toISOString();
-        }
-        return safeStr(ts, 30);
-      };
-
-      let out = `🎞️ <b>Instagram Reels/Posts</b>\n👤 <b>@${escapeHtml(username)}</b>\n\n`;
-
-      top.forEach((p, idx) => {
-        const link = getLink(p);
-        const caption = safeStr(getCaption(p), 180);
-        const stats = getStats(p);
-        const when = getDate(p);
-
-        out += `#${idx + 1}\n`;
-        if (caption) out += `📝 ${escapeHtml(caption)}\n`;
-        if (when) out += `🕒 ${escapeHtml(when)}\n`;
-
-        const parts = [];
-        if (stats.likes !== undefined) parts.push(`❤️ ${stats.likes}`);
-        if (stats.comments !== undefined) parts.push(`💬 ${stats.comments}`);
-        if (stats.views !== undefined) parts.push(`▶️ ${stats.views}`);
-        if (parts.length) out += `${escapeHtml(parts.join(' | '))}\n`;
-
-        if (link) out += `🔗 ${escapeHtml(link)}\n`;
-        out += `\n`;
-      });
-
-      out += `• 1 credit deducted from your balance`;
-
-      await sendFormattedMessage(ctx, out);
+      await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
       user.credits += 1;
@@ -2536,37 +2432,37 @@ bot.command('tginfo', async (ctx) => {
     return;
   }
 
-  const tgIdRaw = (ctx.match ?? ctx.message?.text?.split(' ').slice(1).join(' ')) || '';
-  const tgId = tgIdRaw.toString().trim();
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const tgIdRaw = ctx.match;
+  const tgId = (tgIdRaw || '').toString().trim();
   if (!tgId) {
     await sendFormattedMessage(ctx, '🧾 Usage: /tginfo <telegram_id>\n\nExample: /tginfo 7712689923');
     return;
   }
 
-  if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need 1 credit to use this command.\n💳 Check your balance with /credits');
-    return;
-  }
+  await sendFormattedMessage(ctx, '🧾 Fetching Telegram info...');
 
   try {
     const result = await getTelegramIdInfo(tgId);
 
     if (result.success && result.data) {
-      // If provider returns a plain string, show it as text (but keep it safe).
-      if (typeof result.data === 'string') {
-        const response = `🧾 Telegram Info Results 🧾\n\n${escapeHtml(result.data)}\n\n• 1 credit deducted from your balance`;
-        await sendFormattedMessage(ctx, response);
-        user.totalQueries++;
-        return;
-      }
+      const response = `🧾 Telegram Info Results 🧾
 
-      const response = `🧾 Telegram Info Results 🧾\n\n\\`\\`\\`json\n${JSON.stringify(result.data, null, 2)}\n\\`\\`\\`\n\n• 1 credit deducted from your balance`;
+\`\`\`json
+${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+• 1 credit deducted from your balance`;
+
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
       user.credits += 1;
-      const reason = result?.error ? `\nReason: ${result.error}` : '';
-      await sendFormattedMessage(ctx, `❌ Failed to fetch Telegram info.${reason}\n💳 1 credit refunded`);
+      await sendFormattedMessage(ctx, '❌ Failed to fetch Telegram info.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in tginfo command:', error);
