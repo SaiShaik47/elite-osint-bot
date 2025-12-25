@@ -1279,7 +1279,6 @@ bot.callbackQuery("menu_osint", async (ctx) => {
 • /paknum <number> — Pakistani govt lookup
 • /pak <query> — Pakistan lookup (rehu)
 • /ig <username> — Instagram intelligence
-• /pan <PAN> — PAN lookup
 • /bin <number> — BIN lookup
 • /vehicle <number> — Vehicle details
 • /ff <uid> — Free Fire stats`;
@@ -2256,111 +2255,45 @@ bot.command('ig', async (ctx) => {
 
   // Check credits
   if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits!
-💳 Check your balance with /credits');
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
     return;
   }
 
-  const raw = (ctx.match || '').toString().trim();
-  const username = raw.replace(/^@/, '').trim();
-
+  const username = ctx.match;
   if (!username) {
-    if (!user.isPremium) user.credits += 1; // refund
-    await sendFormattedMessage(ctx, '📷 Usage: /ig <Instagram username>
-
-Example: /ig instagram');
+    await sendFormattedMessage(ctx, '📷 Usage: /ig <Instagram username>\n\nExample: /ig instagram');
     return;
   }
 
-  await sendFormattedMessage(ctx, '📸 Fetching Instagram profile & reels/posts...');
+  await sendFormattedMessage(ctx, '🔍 Fetching Instagram intelligence...');
 
   try {
-    const profileUrl = `https://anmolinstainfo.worldgreeker.workers.dev/user?username=${encodeURIComponent(username)}`;
-    const postsUrl = `https://anmolinstainfo.worldgreeker.workers.dev/posts?username=${encodeURIComponent(username)}`;
-
-    const [profileRes, postsRes] = await Promise.all([
-      axios.get(profileUrl, { timeout: 15000 }),
-      axios.get(postsUrl, { timeout: 20000 })
-    ]);
-
-    const payload = {
-      profile: profileRes.data,
-      reels_posts: postsRes.data
-    };
-
-    const response = `📷 Instagram Intelligence — @${username}
+    const result = await getInstagramInfo(username.toString());
+    
+    if (result.success && result.data) {
+      const response = `📷 Instagram Intelligence Results 📷
 
 \`\`\`json
-${JSON.stringify(payload, null, 2)}
-\`\`\``;
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
 
-    await sendFormattedMessage(ctx, response);
-    user.totalQueries++;
+💡 Instagram information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch Instagram information. Please check the username and try again.\n💳 1 credit refunded');
+    }
   } catch (error) {
-    console.error('Error in ig command:', error?.response?.data || error?.message || error);
-    if (!user.isPremium) user.credits += 1; // refund
-    await sendFormattedMessage(ctx, '❌ Failed to fetch Instagram information. Please check the username and try again.
-💳 1 credit refunded');
+    console.error('Error in ig command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Instagram information.\n💳 1 credit refunded');
   }
 });
-
-
-bot.command('pan', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
-  }
-
-  // Check credits
-  if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits!
-💳 Check your balance with /credits');
-    return;
-  }
-
-  const raw = (ctx.match || '').toString().trim();
-  const pan = raw.toUpperCase();
-
-  if (!pan) {
-    if (!user.isPremium) user.credits += 1; // refund
-    await sendFormattedMessage(ctx, '🪪 Usage: /pan <PAN>
-
-Example: /pan DFMPB5957K');
-    return;
-  }
-
-  // Basic PAN format validation
-  if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
-    if (!user.isPremium) user.credits += 1; // refund
-    await sendFormattedMessage(ctx, '❌ Invalid PAN format.
-✅ Format: ABCDE1234F
-💳 1 credit refunded');
-    return;
-  }
-
-  await sendFormattedMessage(ctx, '🪪 Fetching PAN information...');
-
-  try {
-    const url = `https://abbas-free.bitaimkingfree.workers.dev/?pan=${encodeURIComponent(pan)}`;
-    const res = await axios.get(url, { timeout: 15000 });
-
-    const response = `🪪 PAN Lookup — ${pan}
-
-\`\`\`json
-${JSON.stringify(res.data, null, 2)}
-\`\`\``;
-
-    await sendFormattedMessage(ctx, response);
-    user.totalQueries++;
-  } catch (error) {
-    console.error('Error in pan command:', error?.response?.data || error?.message || error);
-    if (!user.isPremium) user.credits += 1; // refund
-    await sendFormattedMessage(ctx, '❌ Failed to fetch PAN information.
-💳 1 credit refunded');
-  }
-});
-
 
 bot.command('bin', async (ctx) => {
   const user = getOrCreateUser(ctx);
