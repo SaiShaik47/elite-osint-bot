@@ -340,10 +340,46 @@ async function getBasicNumberInfo(number) {
 
 async function getInstagramInfo(username) {
   try {
-    const response = await axios.get(`https://newinstainfoapi.anshppt19.workers.dev/info?username=${username}`);
+    const response = await axios.get(`https://anmolinstainfo.worldgreeker.workers.dev/user?username=${encodeURIComponent(username)}`, { timeout: 20000 });
     return { success: true, data: response.data };
   } catch (error) {
     return { success: false, error: 'Failed to fetch Instagram information' };
+  }
+}
+
+async function getInstagramPosts(username) {
+  try {
+    const response = await axios.get(
+      `https://anmolinstainfo.worldgreeker.workers.dev/posts?username=${encodeURIComponent(username)}`,
+      { timeout: 20000 }
+    );
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch Instagram reels/posts information' };
+  }
+}
+
+async function getPanInfo(pan) {
+  try {
+    const response = await axios.get(
+      `https://abbas-free.bitaimkingfree.workers.dev/?pan=${encodeURIComponent(pan)}`,
+      { timeout: 20000 }
+    );
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch PAN information' };
+  }
+}
+
+async function getTelegramIdInfo(tgId) {
+  try {
+    const response = await axios.get(
+      `https://meowmeow.rf.gd/gand/unkownrandi.php?tg=${encodeURIComponent(tgId)}`,
+      { timeout: 20000 }
+    );
+    return { success: true, data: response.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch Telegram info' };
   }
 }
 
@@ -1241,7 +1277,7 @@ To use the bot:
 🤖 *Bot Info*
 • Name: *${escapeMd(botName)}*
 • Status: ✅ Online
-• Version: \`v4-menu\`
+• Version: \`v6\`
 
 💳 *Credits:* *${user.credits}* 🪙
 ${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
@@ -1278,7 +1314,10 @@ bot.callbackQuery("menu_osint", async (ctx) => {
 • /basicnum <number> — Basic number info
 • /paknum <number> — Pakistani govt lookup
 • /pak <query> — Pakistan lookup (rehu)
-• /ig <username> — Instagram intelligence
+• /ig <username> — Instagram profile intelligence
+• /igreels <username> — Instagram reels/posts fetch
+• /pan <pan> — PAN lookup (India)
+• /tginfo <id> — Telegram ID info fetch
 • /bin <number> — BIN lookup
 • /vehicle <number> — Vehicle details
 • /ff <uid> — Free Fire stats`;
@@ -2295,6 +2334,143 @@ bot.command('ig', async (ctx) => {
   }
 });
 
+
+bot.command('igreels', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const username = ctx.match;
+  if (!username) {
+    await sendFormattedMessage(ctx, '🎞️ Usage: /igreels <Instagram username>\n\nExample: /igreels indiangamedevv');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🎞️ Fetching Instagram reels/posts...');
+
+  try {
+    const result = await getInstagramPosts(username.toString());
+
+    if (result.success && result.data) {
+      const response = `🎞️ Instagram Reels / Posts Results 🎞️
+
+\`\`\`json
+${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch reels/posts information.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in igreels command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching reels/posts information.\n💳 1 credit refunded');
+  }
+});
+
+bot.command('pan', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const pan = ctx.match;
+  if (!pan) {
+    await sendFormattedMessage(ctx, '🪪 Usage: /pan <PAN>\n\nExample: /pan ABCDE1234F');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🪪 Fetching PAN info...');
+
+  try {
+    const result = await getPanInfo(pan.toString());
+
+    if (result.success && result.data) {
+      const response = `🪪 PAN Lookup Results 🪪
+
+\`\`\`json
+${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch PAN information.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in pan command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching PAN information.\n💳 1 credit refunded');
+  }
+});
+
+bot.command('tginfo', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const tgIdRaw = ctx.match;
+  const tgId = (tgIdRaw || '').toString().trim();
+  if (!tgId) {
+    await sendFormattedMessage(ctx, '🧾 Usage: /tginfo <telegram_id>\n\nExample: /tginfo 7712689923');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🧾 Fetching Telegram info...');
+
+  try {
+    const result = await getTelegramIdInfo(tgId);
+
+    if (result.success && result.data) {
+      const response = `🧾 Telegram Info Results 🧾
+
+\`\`\`json
+${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch Telegram info.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in tginfo command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Telegram info.\n💳 1 credit refunded');
+  }
+});
+
 bot.command('bin', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
@@ -2639,6 +2815,9 @@ bot.command('help', async (ctx) => {
 • /postoffice <name> - India post office search
 • /ifsc <ifsc> - IFSC bank details
 • /ig <username> - Instagram profile intelligence
+• /igreels <username> - Instagram reels/posts fetch
+• /pan <pan> - PAN lookup (India)
+• /tginfo <id> - Telegram ID info fetch
 
 🚗 Vehicle & Gaming:
 • /vehicle <number> - Vehicle registration details
@@ -2680,6 +2859,9 @@ bot.command('help', async (ctx) => {
 • /ifsc SBIN0001234
 • /thumb https://youtu.be/8of5w7RgcTc
 • /ig instagram
+• /igreels indiangamedevv
+• /pan ABCDE1234F
+• /tginfo 7712689923
 • /dl https://www.instagram.com/reel/DSSvFDgjU3s/
 • /snap https://snapchat.com/t/H2D8zTxt
 • /pin https://pin.it/4gsJMxtt1
