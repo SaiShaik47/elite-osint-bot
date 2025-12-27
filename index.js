@@ -2989,7 +2989,10 @@ function buildImgKeyboard(state, apiUrl) {
 
 async function generateAndSendImage(ctx, user, state, { replaceMessageId = null } = {}) {
   const prompt = String(state?.prompt || '').trim();
-  if (!prompt) throw new Error('Missing prompt');
+  if (!prompt) {
+    try { await sendFormattedMessage(ctx, '❌ Missing prompt. Use /img <prompt>'); } catch (_) {}
+    return;
+  }
 
   const qs = new URLSearchParams();
   qs.set('prompt', prompt);
@@ -3064,11 +3067,11 @@ async function handleImgGenCommand(ctx) {
   const state = { prompt, improve: false, format: 'square', random: '' };
   global.__imgCache.set(key, state);
 
-  return generateAndSendImage(ctx, state);
+  return generateAndSendImage(ctx, user, state);
 }
 
-bot.command('img', handleImgGenCommand);
-bot.command('imggen', handleImgGenCommand);
+// // bot.command('img', handleImgGenCommand); // disabled (using unified handler) // disabled (using unified handler)
+// // bot.command('imggen', handleImgGenCommand); // disabled (using unified handler) // disabled (using unified handler)
 
 // Inline buttons handler
 bot.callbackQuery(/^imgopt_(improve|wide|random)$/, async (ctx) => {
@@ -3138,6 +3141,13 @@ bot.command(['img', 'imggen'], async (ctx) => {
     refundCredits(user, 1);
     return sendFormattedMessage(ctx, '🖼️ Usage: /img <prompt>\nExample: /img spiderman');
   }
+  // Cache state for inline buttons (Improve/Wide/Random)
+  try {
+    const key = `${ctx.chat.id}:${ctx.from.id}`;
+    global.__imgCache = global.__imgCache || new Map();
+    global.__imgCache.set(key, { ...state });
+  } catch (_) {}
+
 
   // A small "working" message, then send final media
   let workingMsgId = null;
