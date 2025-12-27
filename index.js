@@ -2187,6 +2187,78 @@ bot.command('ai', async (ctx) => {
   }
 });
 
+
+async function handleSpotifySearch(ctx) {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  const q = getCommandArgs(ctx);
+  if (!q) {
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '🔎 Usage: /spsearch <song name / artist>');
+  }
+
+  await sendFormattedMessage(ctx, '🔎 Searching Spotify tracks...');
+
+  try {
+    const api = `https://flip-apiakib.vercel.app/spotify/search?q=${encodeURIComponent(q)}`;
+    const res = await axiosGetWithRetry(api, { timeout: 35000 }, 2);
+    const data = res.data || {};
+
+    const items =
+      (Array.isArray(data?.data) ? data.data : null) ||
+      (Array.isArray(data?.tracks) ? data.tracks : null) ||
+      (Array.isArray(data?.data?.tracks) ? data.data.tracks : null) ||
+      (Array.isArray(data?.items) ? data.items : null) ||
+      [];
+
+    if (!items.length) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ No tracks found.');
+    }
+
+    user.totalQueries++;
+
+    const top = items.slice(0, 8).map((t, idx) => {
+      const title = t?.title || t?.name || `Track ${idx + 1}`;
+      const artist =
+        t?.artist ||
+        t?.artists?.[0]?.name ||
+        (Array.isArray(t?.artists) ? t.artists.map(a => a?.name).filter(Boolean).join(', ') : '') ||
+        '';
+      const link =
+        t?.url ||
+        t?.link ||
+        t?.spotify_url ||
+        t?.external_urls?.spotify ||
+        t?.trackUrl ||
+        '';
+      return { title, artist, link };
+    });
+
+    const lines = top.map((t, i) => {
+      const name = escapeMd(`${i + 1}. ${t.title}${t.artist ? ` — ${t.artist}` : ''}`);
+      const lnk = isHttpUrl(t.link) ? t.link : '';
+      return lnk ? `${name}\n${lnk}` : name;
+    });
+
+    return sendLongOrFile(
+      ctx,
+      `🎵 *Spotify Search Results*\n\n${lines.join('\n\n')}\n\nTip: Copy a track URL and use:\n/spotify <track url>`,
+      'spotify_search'
+    );
+  } catch (e) {
+    console.error('spsearch error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ Spotify search failed. Try again later.');
+  }
+}
+
+bot.command('spsearch', handleSpotifySearch);
+bot.command('spotifysearch', handleSpotifySearch);
+
 bot.command('spotify', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
@@ -2284,61 +2356,105 @@ bot.command('spotify', async (ctx) => {
   }
 });
 
+
 bot.command('yt', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
 
   if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
 
-  const url = getCommandArgs(ctx);
-  if (!url) {
+  const input = getCommandArgs(ctx);
+  if (!input) {
     user.credits += 1;
     return sendFormattedMessage(ctx, '🎬 Usage: /yt <youtube url>');
   }
 
-  await sendFormattedMessage(ctx, '🎬 Fetching YouTube download...');
+  // Accept either a YouTube URL or a direct ytcontent process URL.
+  const raw = input.trim();
+
+  // Extract video id from common YouTube links
+  function extractYouTubeId(u) {
+    try {
+      const s = String(u || '');
+      const m1 = s.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
+      if (m1) return m1[1];
+      const m2 = s.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
+      if (m2) return m2[1];
+      const m3 = s.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
+      if (m3) return m3[1];
+      const m4 = s.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+      if (m4) return m4[1];
+    } catch (_) {}
+    return null;
+  }
+
+  // Try to pick a URL for a given quality from a list
+  function pickQuality(urls, q) {
+    const u = (urls || []).filter(isHttpUrl);
+    const s = String(q);
+    const direct = u.find(x => x.includes(s)) || null;
+    if (direct) return direct;
+
+    // some APIs use itags instead of "720p"
+    const itagMap = { '1080': ['137','299','303','399'], '720': ['22','136','298','302'], '480': ['135','244','18'] };
+    const itags = itagMap[s] || [];
+    for (const it of itags) {
+      const hit = u.find(x => new RegExp(`(?:itag|itags?|=)${it}(?:\D|$)`, 'i').test(x));
+      if (hit) return hit;
+    }
+
+    // last resort: prefer mp4/video links
+    const mp4 = u.filter(x => /\.mp4(\?|$)/i.test(x) || /mime=video/i.test(x) || /video/i.test(x));
+    return mp4[0] || u[0] || null;
+  }
+
+  await sendFormattedMessage(ctx, '🎬 Preparing quality options...');
 
   try {
-    const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(url)}`;
-    const res = await axiosGetWithRetry(api, { timeout: 45000 }, 2);
-    const data = res.data || {};
+    let urls = [];
 
-    // Collect all URLs from response and prefer MP4
-    const allUrls = findAllUrlsDeep(data);
-    const mp4Urls = allUrls.filter(u => /\.mp4(\?|$)/i.test(u) || /mime=video/i.test(u) || /video/i.test(u));
-    const chosen = (mp4Urls[0] || allUrls[0]) || null;
+    // If user provided ytcontent process link, fetch it directly
+    if (/ytcontent\.net\/v3\/videoProcess\//i.test(raw)) {
+      const res = await axiosGetWithRetry(raw, { timeout: 45000 }, 2);
+      urls = findAllUrlsDeep(res.data || {});
+    } else {
+      // Default: use existing resolver API
+      const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(raw)}`;
+      const res = await axiosGetWithRetry(api, { timeout: 45000 }, 2);
+      const data = res.data || {};
+      urls = findAllUrlsDeep(data);
+    }
 
-    if (!isHttpUrl(chosen)) {
+    if (!urls.length) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
+    }
+
+    const u1080 = pickQuality(urls, '1080');
+    const u720 = pickQuality(urls, '720');
+    const u480 = pickQuality(urls, '480');
+
+    if (!isHttpUrl(u1080) && !isHttpUrl(u720) && !isHttpUrl(u480)) {
       user.credits += 1;
       return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
     }
 
     user.totalQueries++;
 
-    // User wants VIDEO type in chat.
-    try {
-      await ctx.replyWithVideo(chosen, { caption: '🎬 YouTube Video' });
-    } catch (sendErr) {
-      // If Telegram can't fetch or the file is too big, send links as plain text
-      await ctx.reply(`🎬 Video link:\n${chosen}`, {
-        disable_web_page_preview: true,
-      });
-    }
+    // ONLY response: buttons (no extra links, no video auto-send)
+    const kb = new InlineKeyboard()
+      .url('1080p', isHttpUrl(u1080) ? u1080 : (isHttpUrl(u720) ? u720 : u480)).row()
+      .url('720p', isHttpUrl(u720) ? u720 : (isHttpUrl(u480) ? u480 : u1080)).row()
+      .url('480p', isHttpUrl(u480) ? u480 : (isHttpUrl(u720) ? u720 : u1080));
 
-    // If there are more options, send one-by-one as links
-    const options = mp4Urls.length ? mp4Urls : allUrls;
-    const extra = options.filter(u => u !== chosen).slice(0, 5);
-    for (const u of extra) {
-      await ctx.reply(`⬇️ Option link:\n${u}`, { disable_web_page_preview: true });
-    }
-
-    return true;
+    return ctx.reply('🎬 Choose Quality:', { reply_markup: kb });
   } catch (e) {
     console.error('yt error:', e?.message || e);
     user.credits += 1;
     return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.');
   }
 });
+
 
 // OSINT Commands
 bot.command('ip', async (ctx) => {
