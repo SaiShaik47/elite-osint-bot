@@ -139,6 +139,12 @@ if (!botToken) {
 const bot = new Bot(botToken);
 
 // ===============================
+// YouTube Jobs (for non-blocking progress + stop button)
+// ===============================
+if (!global.__ytJobs) global.__ytJobs = new Map();
+
+
+// ===============================
 // BAN MIDDLEWARE (blocks banned users globally)
 // ===============================
 bot.use(async (ctx, next) => {
@@ -3165,10 +3171,46 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
     try { return await ctx.reply('❌ This quality is not available for this video.'); } catch (_) { return; }
   }
 
-  // If it's a ytcontent "videoProcess" URL, poll and keep editing the same message with % + ETA + speed.
-  if (/ytcontent\.net\/v3\/videoProcess\//i.test(url)) {
+  
+// If it's a ytcontent "videoProcess" URL, poll progress in the background (NON-BLOCKING) + provide a Stop button.
+if (/ytcontent\.net\/v3\/videoProcess\//i.test(url)) {
+  const baseKey = `${ctx.chat.id}:${ctx.from.id}`;
+
+  // Cancel any existing job for this user/chat
+  const prev = global.__ytJobs.get(baseKey);
+  if (prev) prev.cancelled = true;
+
+  const jobId = `${baseKey}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  const stopKb = new InlineKeyboard().text('⛔ Stop', `ytstop_${jobId}`);
+
+  // Send initial progress message (we will keep editing this)
+  let msg = null;
+  try {
+    msg = await ctx.reply(
+      formatYtProcessHtml({ percent: '0%', fileUrl: 'In Processing...' }, url, { speedText: '…', etaText: '…' }),
+      { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: stopKb }
+    );
+  } catch (_) {}
+
+  const job = {
+    jobId,
+    baseKey,
+    chatId: ctx.chat.id,
+    userId: ctx.from.id,
+    messageId: msg?.message_id || null,
+    quality: q,
+    processUrl: url,
+    cancelled: false,
+    startedAt: Date.now()
+  };
+
+  global.__ytJobs.set(baseKey, job);
+  global.__ytJobs.set(jobId, job);
+
+  // Background runner (do NOT await)
+  (async () => {
     const intervalMs = 2500;
-    const maxTries = 90; // ~3.75 min
+    const maxTries = 120; // ~5 min
 
     let lastPct = null;
     let lastT = Date.now();
@@ -3183,92 +3225,147 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
     }
     function fmtSpeed(bps) {
       if (!isFinite(bps) || bps <= 0) return '…';
-      const mbps = bps / (1024 * 1024);
-      return `${mbps.toFixed(2)} MB/s`;
+      const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+      let u = 0;
+      let v = bps;
+      while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
+      return `${v.toFixed(2)} ${units[u]}`;
     }
 
-    for (let i = 0; i < maxTries; i++) {
-      let data = {};
-      try {
-        const r = await axiosGetWithRetry(url, { timeout: 45000, responseType: 'json' }, 2);
-        data = r.data || {};
-      } catch (_) {
-        data = { percent: lastPct != null ? `${lastPct}%` : '…' };
-      }
-
-      const percentRaw = data?.percent ?? data?.progress ?? '…';
-      const m = String(percentRaw).match(/(\d+(\.\d+)?)/);
-      const pct = m ? parseFloat(m[1]) : null;
-
-      // total bytes (best-effort)
-      const totalBytes =
-        (typeof data?.fileSizeBytes === 'number' && data.fileSizeBytes) ||
-        (typeof data?.fileSize === 'number' && data.fileSize) ||
-        (typeof data?.estimatedFileSizeBytes === 'number' && data.estimatedFileSizeBytes) ||
-        lastTotalBytes ||
-        null;
-      if (totalBytes) lastTotalBytes = totalBytes;
-
-      // compute speed and eta from percent delta
-      const now = Date.now();
-      const dtSec = Math.max(0.001, (now - lastT) / 1000);
-
-      let speedText = '';
-      let etaText = '';
-
-      if (pct != null && lastPct != null && pct > lastPct) {
-        const ratePctPerSec = (pct - lastPct) / dtSec;
-        etaText = fmtEta((100 - pct) / ratePctPerSec);
-
-        if (totalBytes) {
-          const downloadedNow = totalBytes * (pct / 100);
-          const downloadedPrev = totalBytes * (lastPct / 100);
-          const bps = (downloadedNow - downloadedPrev) / dtSec;
-          speedText = fmtSpeed(bps);
-        } else {
-          // fallback: show %/s as "speed"
-          speedText = `${ratePctPerSec.toFixed(2)} %/s`;
+    try {
+      for (let i = 0; i < maxTries; i++) {
+        if (job.cancelled) {
+          if (job.messageId) {
+            try {
+              await ctx.api.editMessageText(
+                job.chatId,
+                job.messageId,
+                '⛔ <b>Download stopped.</b>\n\nRun /yt again to restart.',
+                { parse_mode: 'HTML', disable_web_page_preview: true }
+              );
+            } catch (_) {}
+          }
+          return;
         }
+
+        const res = await axiosGetWithRetry(job.processUrl, { timeout: 45000, responseType: 'json' }, 2);
+        const data = res.data || {};
+
+        const fileUrl = data.fileUrl || data.url || data.download || data.download_url || null;
+        const percentRaw = data.percent || data.progress || data.percentage || data.status || '…';
+        const m = String(percentRaw).match(/(\d+(\.\d+)?)/);
+        const pct = m ? parseFloat(m[1]) : null;
+
+        const totalBytes =
+          (typeof data?.fileSizeBytes === 'number' && data.fileSizeBytes) ||
+          (typeof data?.fileSize === 'number' && data.fileSize) ||
+          (typeof data?.estimatedFileSizeBytes === 'number' && data.estimatedFileSizeBytes) ||
+          lastTotalBytes ||
+          null;
+        if (totalBytes) lastTotalBytes = totalBytes;
+
+        // ready
+        if (typeof fileUrl === 'string' && /^https?:\/\//i.test(fileUrl) && !/in\s*processing/i.test(fileUrl)) {
+          if (job.messageId) {
+            try {
+              await ctx.api.editMessageText(
+                job.chatId,
+                job.messageId,
+                `✅ <b>YouTube ${escapeHtml(String(job.quality))}p ready</b>\n\n⬇️ <b>Download URL:</b>\n<code>${escapeHtml(fileUrl)}</code>`,
+                { parse_mode: 'HTML', disable_web_page_preview: true }
+              );
+            } catch (_) {}
+          } else {
+            try {
+              await ctx.api.sendMessage(
+                job.chatId,
+                `✅ *YouTube ${job.quality}p*\n\n⬇️ Download URL:\n${fileUrl}`,
+                { parse_mode: 'Markdown', disable_web_page_preview: true }
+              );
+            } catch (_) {}
+          }
+
+          try {
+            await sendVideoSmart({ ...ctx, chat: { id: job.chatId } }, fileUrl, `🎬 YouTube ${job.quality}p`);
+          } catch (_) {}
+
+          try { await adminAudit('yt_download_ready', ctx, `${job.quality}p | ${fileUrl}`); } catch (_) {}
+          return;
+        }
+
+        // compute speed/eta from percent delta
+        let speedText = '…';
+        let etaText = '…';
+        const now = Date.now();
+        const dtSec = Math.max(0.001, (now - lastT) / 1000);
+
+        if (pct != null && lastPct != null && pct > lastPct) {
+          const ratePctPerSec = (pct - lastPct) / dtSec;
+          etaText = fmtEta((100 - pct) / ratePctPerSec);
+
+          if (totalBytes) {
+            const downloadedNow = totalBytes * (pct / 100);
+            const downloadedPrev = totalBytes * (lastPct / 100);
+            const bps = (downloadedNow - downloadedPrev) / dtSec;
+            speedText = fmtSpeed(bps);
+          } else {
+            speedText = `${ratePctPerSec.toFixed(2)} %/s`;
+          }
+        }
+
+        lastPct = pct;
+        lastT = now;
+
+        if (job.messageId) {
+          try {
+            await ctx.api.editMessageText(
+              job.chatId,
+              job.messageId,
+              formatYtProcessHtml(data, job.processUrl, { speedText, etaText }),
+              { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: stopKb }
+            );
+          } catch (_) {}
+        }
+
+        await sleep(intervalMs);
+      }
+
+      if (job.messageId) {
+        try {
+          await ctx.api.editMessageText(
+            job.chatId,
+            job.messageId,
+            '❌ <b>Processing timed out.</b>\n\nTry again later.',
+            { parse_mode: 'HTML', disable_web_page_preview: true }
+          );
+        } catch (_) {}
       } else {
-        speedText = '…';
-        etaText = '…';
+        try { await ctx.api.sendMessage(job.chatId, '❌ Processing timed out. Try again later.'); } catch (_) {}
       }
-
-      // Update message
-      try {
-        await ctx.editMessageText(
-          formatYtProcessHtml(data, url, { speedText, etaText }),
-          { parse_mode: 'HTML', disable_web_page_preview: true }
-        );
-      } catch (_) {
-        // ignore edit errors (e.g., message too old)
+    } catch (e) {
+      if (job.messageId) {
+        try {
+          await ctx.api.editMessageText(
+            job.chatId,
+            job.messageId,
+            '❌ <b>Download failed.</b> Try again later.',
+            { parse_mode: 'HTML', disable_web_page_preview: true }
+          );
+        } catch (_) {}
+      } else {
+        try { await ctx.api.sendMessage(job.chatId, '❌ Download failed. Try again later.'); } catch (_) {}
       }
-
-      lastT = now;
-      if (pct != null) lastPct = pct;
-
-      const fileUrl = data.fileUrl || data.url || data.download || data.download_url || null;
-      const ready = typeof fileUrl === 'string' && /^https?:\/\//i.test(fileUrl) && !/in\s*processing/i.test(fileUrl);
-
-      if (ready) {
-        await ctx.reply(
-          `✅ *${q}p Ready!*\n\n⬇️ File URL:\n${fileUrl}`,
-          { parse_mode: 'Markdown', disable_web_page_preview: true }
-        );
-        try { await sendVideoSmart(ctx, fileUrl, `🎬 YouTube ${q}p`); } catch (_) {}
-        await adminAudit('yt_download_ready', ctx, `${q}p | ${fileUrl}`);
-        return;
-      }
-
-      await sleep(intervalMs);
+    } finally {
+      global.__ytJobs.delete(job.baseKey);
+      global.__ytJobs.delete(job.jobId);
     }
+  })();
 
-    // Timed out
-    await ctx.reply('❌ Processing timed out. Try again later.');
-    return;
-  }
+  // Return immediately so the bot stays responsive for everyone
+  return;
+}
 
-  // Direct URL (already ready)
+// Direct URL (already ready)
   await ctx.reply(
     `✅ *YouTube ${q}p*\n\n⬇️ Download URL:\n${url}`,
     { parse_mode: 'Markdown', disable_web_page_preview: true }
@@ -3278,6 +3375,41 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
 });
 
 
+
+
+// Stop an active YT processing job
+bot.callbackQuery(/^ytstop_(.+)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery('Stopping…'); } catch (_) {}
+
+  const jobId = ctx.match?.[1];
+  const job = (global.__ytJobs && global.__ytJobs.get(jobId)) || null;
+
+  if (!job) {
+    try { await ctx.reply('❌ No active download to stop.'); } catch (_) {}
+    return;
+  }
+
+  const caller = String(ctx.from?.id || '');
+  if (caller !== String(job.userId) && !isAdmin(caller) && caller !== String(adminId)) {
+    try { await ctx.reply('❌ You can only stop your own download.'); } catch (_) {}
+    return;
+  }
+
+  job.cancelled = true;
+
+  if (job.messageId) {
+    try {
+      await ctx.api.editMessageText(
+        job.chatId,
+        job.messageId,
+        '⛔ <b>Stopping…</b>',
+        { parse_mode: 'HTML', disable_web_page_preview: true }
+      );
+    } catch (_) {}
+  }
+
+  try { await adminAudit('yt_download_stopped', ctx, `${job.quality}p | ${job.processUrl}`); } catch (_) {}
+});
 
 // OSINT Commands
 bot.command('ip', async (ctx) => {
