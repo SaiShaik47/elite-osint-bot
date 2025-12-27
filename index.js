@@ -2,6 +2,55 @@ const { Bot, InlineKeyboard, Api } = require('grammy');
 const axios = require('axios');
 const crypto = require('crypto');
 
+
+// ===============================
+// HTTP HELPERS (RETRY + SAFETY)
+// ===============================
+const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Robust GET helper with retries + HTML-block detection
+async function axiosGetWithRetry(url, opts = {}, attempts = 3) {
+  const timeout = opts.timeout ?? 25000;
+  const headers = { 'user-agent': DEFAULT_UA, ...(opts.headers || {}) };
+
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await axios.get(url, {
+        timeout,
+        headers,
+        validateStatus: () => true,
+        responseType: opts.responseType || 'json'
+      });
+
+      // Detect WAF / HTML blocks (common for free APIs)
+      const ct = String(res.headers?.['content-type'] || '').toLowerCase();
+      if (typeof res.data === 'string') {
+        const s = res.data.slice(0, 500).toLowerCase();
+        if (s.includes('<html') || s.includes('cloudflare') || s.includes('attention required')) {
+          const e = new Error(`Blocked by upstream (html/waf). status=${res.status} ct=${ct}`);
+          e._blocked = true;
+          throw e;
+        }
+      }
+
+      if (res.status >= 200 && res.status < 300) return res;
+      const e = new Error(`HTTP ${res.status}`);
+      e._status = res.status;
+      e._data = res.data;
+      throw e;
+    } catch (err) {
+      lastErr = err;
+      // exponential-ish backoff
+      if (i < attempts - 1) await sleep(800 * (i + 1));
+    }
+  }
+  throw lastErr || new Error('Request failed');
+}
+
+
 // Load environment variables
 require('dotenv').config();
 
@@ -349,12 +398,11 @@ async function getInstagramInfo(username) {
 
 async function getInstagramPosts(username) {
   try {
-    const response = await axios.get(
-      `https://anmolinstainfo.worldgreeker.workers.dev/posts?username=${encodeURIComponent(username)}`,
-      { timeout: 20000 }
-    );
-    return { success: true, data: response.data };
+    const url = `https://anmolinstainfo.worldgreeker.workers.dev/posts?username=${encodeURIComponent(username)}`;
+    const res = await axiosGetWithRetry(url, { timeout: 30000 }, 4);
+    return { success: true, data: res.data };
   } catch (error) {
+    console.error('getInstagramPosts error:', error?.message || error);
     return { success: false, error: 'Failed to fetch Instagram reels/posts information' };
   }
 }
@@ -391,6 +439,26 @@ async function getBinInfo(bin) {
     return { success: false, error: 'Failed to fetch BIN information' };
   }
 }
+
+async function getDeepBinInfo(bin) {
+  try {
+    const url = `https://bins.stormx.pw/bin/${encodeURIComponent(String(bin))}`;
+    const res = await axiosGetWithRetry(url, { timeout: 20000 }, 3);
+    return { success: true, data: res.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch Deep BIN information' };
+  }
+}
+
+async function getTempMailStatus() {
+  try {
+    const res = await axiosGetWithRetry('https://tobi-tempmail-api.vercel.app/', { timeout: 20000 }, 2);
+    return { success: true, data: res.data };
+  } catch (error) {
+    return { success: false, error: 'Failed to fetch temp mail info' };
+  }
+}
+
 
 async function getVehicleInfo(vehicleNumber) {
   try {
@@ -691,21 +759,168 @@ async function downloadFacebook(videoUrl) {
 // Fixed TeraBox download function
 async function downloadTeraBox(videoUrl) {
   try {
-    const apiKey = 'RushVx'; // Your API key
-    const apiUrl = `https://teradl.tiiny.io/?key=${apiKey}&link=${encodeURIComponent(videoUrl)}`;
-    const response = await axios.get(apiUrl, { timeout: 60000 }); // Increased timeout for large files
-    
-    // Log the response for debugging
-    console.log('TeraBox API Response:', JSON.stringify(response.data, null, 2));
-    
-    return { success: true, data: response.data };
+    const apiKey = process.env.TERABOX_API_KEY || 'RushVx';
+    const base = process.env.TERABOX_API_URL || 'https://teradl.tiiny.io/';
+    const apiUrl = `${base}?key=${encodeURIComponent(apiKey)}&link=${encodeURIComponent(videoUrl)}`;
+
+    const res = await axiosGetWithRetry(apiUrl, { timeout: 65000 }, 1);
+
+    // Log the response for debugging (keep short)
+    try { console.log('TeraBox API status:', res.status); } catch (_) {}
+
+    return { success: true, data: res.data, apiUrl };
   } catch (error) {
-    console.error('TeraBox API Error:', error.response?.data || error.message);
+    console.error('TeraBox API Error:', error?._data || error?.message || error);
     return { success: false, error: 'Failed to fetch download link from TeraBox API.' };
   }
 }
 
+// Retry until we extract at least one direct http(s) download link
+async function downloadTeraBoxWithRetry(videoUrl, attempts = 4) {
+  let last = null;
+  for (let i = 0; i < attempts; i++) {
+    last = await downloadTeraBox(videoUrl);
+    if (last.success) {
+      const items = extractTeraBoxItems(last.data);
+      if (items.length) return { ...last, items, attempt: i + 1 };
+    }
+    await sleep(1200 * (i + 1));
+  }
+  return { ...(last || { success: false, error: 'TeraBox failed' }), items: [], attempt: attempts };
+}
+
+function extractTeraBoxItems(data) {
+  // Your API usually returns: { data: [ {title, size, download, Channel}, ... ] } OR array directly
+  let videos = [];
+  if (Array.isArray(data)) videos = data;
+  else if (Array.isArray(data?.data)) videos = data.data;
+  else if (Array.isArray(data?.videos)) videos = data.videos;
+  else if (data && typeof data === 'object') videos = [data];
+
+  const out = [];
+  for (const item of videos) {
+    const url =
+      item?.download ||
+      item?.url ||
+      item?.download_url ||
+      item?.link ||
+      item?.src ||
+      item?.source ||
+      (typeof item === 'string' ? item : null);
+
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+      out.push({
+        title: item?.title || item?.name || 'TeraBox File',
+        size: item?.size || 'Unknown',
+        channel: item?.Channel || item?.channel || '',
+        download: url
+      });
+    }
+  }
+  return out;
+}
+
+
+
 // ===== HELPER FUNCTIONS =====
+
+
+
+// ===============================
+// TOBI-INSTA-API (IMAGES DOWNLOADER)
+// Instagram (posts), Twitter (tweet images), Pinterest (pin images)
+// API: https://tobi-insta-api.onrender.com/
+// ===============================
+const TOBI_INSTA_API = 'https://tobi-insta-api.onrender.com';
+
+function isProbablyShortUrl(u) {
+  return /(t\.co|bit\.ly|tinyurl\.com|shorturl|cutt\.ly|pin\.it)/i.test(u || '');
+}
+
+async function resolveShortUrl(url) {
+  try {
+    const res = await axiosGetWithRetry(`${TOBI_INSTA_API}/resolve?url=${encodeURIComponent(url)}`, { timeout: 20000 }, 2);
+    // try common keys
+    const resolved =
+      res.data?.finalUrl ||
+      res.data?.resolved ||
+      res.data?.url ||
+      res.data?.data?.finalUrl ||
+      res.data?.data?.url ||
+      findFirstUrlDeep(res.data);
+    return (typeof resolved === 'string' && /^https?:\/\//i.test(resolved)) ? resolved : url;
+  } catch {
+    return url;
+  }
+}
+
+function extractImageUrls(payload) {
+  // Best-effort: get all http(s) image links from likely keys
+  const urls = [];
+  const push = (u) => { if (typeof u === 'string' && /^https?:\/\//i.test(u)) urls.push(u); };
+
+  if (!payload) return urls;
+
+  if (Array.isArray(payload)) {
+    for (const v of payload) {
+      if (typeof v === 'string') push(v);
+      else if (v && typeof v === 'object') {
+        push(v.url); push(v.image); push(v.src);
+        const deep = findFirstUrlDeep(v);
+        if (deep) push(deep);
+      }
+    }
+  } else if (typeof payload === 'object') {
+    const candidates = [
+      payload.images, payload.image, payload.urls, payload.media, payload.data,
+      payload.result, payload.items
+    ];
+    for (const c of candidates) {
+      const more = extractImageUrls(c);
+      for (const u of more) push(u);
+    }
+    // last resort single deep url
+    const deep = findFirstUrlDeep(payload);
+    if (deep) push(deep);
+  } else if (typeof payload === 'string') {
+    push(payload);
+  }
+
+  // unique + keep order
+  return [...new Set(urls)];
+}
+
+async function sendImagesAsAlbum(ctx, urls, caption) {
+  const clean = (urls || []).filter(u => typeof u === 'string' && /^https?:\/\//i.test(u));
+  if (!clean.length) return false;
+
+  // Telegram media groups max 10 items
+  const batch = clean.slice(0, 10);
+  const media = batch.map((u, i) => ({
+    type: 'photo',
+    media: u,
+    ...(i === 0 && caption ? { caption } : {})
+  }));
+
+  try {
+    await ctx.replyWithMediaGroup(media);
+    return true;
+  } catch (e) {
+    // fallback: send links
+    const msg = `${caption || '🖼️ Images'}\n\n${batch.join('\n')}`;
+    await sendLongOrFile(ctx, msg, 'images');
+    return true;
+  }
+}
+
+async function tobiDownloadImages(kind, url) {
+  const target = isProbablyShortUrl(url) ? await resolveShortUrl(url) : url;
+  const endpoint = `${TOBI_INSTA_API}/${kind}?url=${encodeURIComponent(target)}`;
+  const res = await axiosGetWithRetry(endpoint, { timeout: 35000 }, 3);
+  const data = res.data;
+  const urls = extractImageUrls(data);
+  return { endpoint, input: url, resolved: target, data, urls };
+}
 
 // Auto-detect platform from URL
 function detectPlatform(url) {
@@ -807,76 +1022,47 @@ function escapeHtml(text = "") {
 // Fixed TeraBox multi-video downloads handler
 async function handleTeraBox(ctx, url) {
   try {
-    const result = await downloadTeraBox(url);
-    
+    // Auto-retry: many free TeraBox APIs sometimes return empty/temporary responses
+    const result = await downloadTeraBoxWithRetry(url, 4);
+
     if (!result.success) {
       await sendFormattedMessage(ctx, '❌ Failed to process TeraBox link.');
       return false;
     }
-    
-    // Your API returns: { data: [ {title, size, download, Channel}, ... ] }
-    let videos = [];
-    
-    if (Array.isArray(result.data)) {
-      videos = result.data;
-    } else if (Array.isArray(result.data?.data)) {
-      videos = result.data.data;
-    } else if (Array.isArray(result.data?.videos)) {
-      videos = result.data.videos;
-    } else {
-      // If we can't find an array of videos, check if the response itself contains a video
-      if (result.data?.download || result.data?.url) {
-        videos = [result.data];
-      } else {
-        await sendFormattedMessage(ctx, '❌ No videos found in TeraBox response.');
-        return false;
-      }
-    }
-    
+
+    const videos = result.items || [];
     if (!videos.length) {
-      await sendFormattedMessage(ctx, '❌ No videos found in TeraBox link.');
+      // show small debug help (no sensitive data)
+      await sendFormattedMessage(
+        ctx,
+        `❌ No direct download links found (after ${result.attempt || 4} tries).\n\nTip: try again in a few seconds or send a different TeraBox share link.`
+      );
       return false;
     }
-    
-    // Send each video in a separate message with a delay to avoid rate limiting
+
+    // Send each item (text is most reliable)
     for (let i = 0; i < videos.length; i++) {
-      const item = videos[i] || {};
-      
-      // ✅ IMPORTANT: your field is "download"
-      const downloadUrl =
-        item.download ||
-        item.url ||
-        item.download_url ||
-        item.link ||
-        item.src ||
-        item.source ||
-        (typeof item === "string" ? item : null);
-      
-      if (!downloadUrl || typeof downloadUrl !== "string" || !downloadUrl.startsWith("http")) {
-        console.log(`Could not extract URL for video ${i+1}:`, JSON.stringify(item, null, 2));
-        await sendFormattedMessage(ctx, `❌ Could not extract download link for video ${i+1}/${videos.length}`);
-        continue;
-      }
-      
-      const title = item.title || item.name || `TeraBox Video ${i + 1}`;
-      const size = item.size || "Unknown";
-      const channel = item.Channel || item.channel || "";
-      
-      // ✅ Full info message (like your screenshot)
+      const item = videos[i];
+      const title = item.title || `TeraBox File ${i + 1}`;
+      const size = item.size || 'Unknown';
+      const channel = item.channel || '';
+
       const msg =
-        `📦 *TeraBox Video ${i + 1}/${videos.length}*\n\n` +
+        `📦 *TeraBox File ${i + 1}/${videos.length}*\n\n` +
         `*Title:* \`${escapeMd(title)}\`\n` +
         `*Size:* \`${escapeMd(size)}\`\n` +
-        (channel ? `*Channel:* \`${escapeMd(channel)}\`\n` : "") +
-        `\n*Download:* \n${downloadUrl}`;
+        (channel ? `*Channel:* \`${escapeMd(channel)}\`\n` : '') +
+        `\n*Download:*\n${item.download}`;
 
-      // small delay to avoid flood
-      if (i > 0) await new Promise((r) => setTimeout(r, 1200));
-
-      // send as text with info (always works)
-      await ctx.reply(msg, { parse_mode: "Markdown" });
+      if (i > 0) await sleep(1100);
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
     }
-    
+
+    // Optional: show that we retried
+    if ((result.attempt || 1) > 1) {
+      await sendFormattedMessage(ctx, `✅ Direct links extracted after ${result.attempt} tries.`);
+    }
+
     return true;
   } catch (error) {
     console.error('Error handling TeraBox:', error);
@@ -1319,6 +1505,8 @@ bot.callbackQuery("menu_osint", async (ctx) => {
 • /pan <pan> — PAN lookup (India)
 • /tginfo <id> — Telegram ID info fetch
 • /bin <number> — BIN lookup
+• /deepbin <bin> — Deep BIN info (stormx)
+• /tempmail — TempMail generator
 • /vehicle <number> — Vehicle details
 • /ff <uid> — Free Fire stats`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
@@ -1333,7 +1521,10 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /insta <url> — Instagram downloader
 • /pin <url> — Pinterest downloader
 • /fb <url> — Facebook downloader
-• /terabox <url> — TeraBox downloader
+• /terabox <url> — TeraBox downloader (auto-retry)
+• /igdl <url> — Instagram images (posts)
+• /pindl <url> — Pinterest images
+• /twtdl <url> — Twitter/X images
 • /thumb <url> — YouTube thumbnail (image)`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
@@ -1814,7 +2005,58 @@ bot.command('terabox', async (ctx) => {
     user.credits += 1; // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
-});
+});// ===============================
+// IMAGE DOWNLOADERS (TOBI-INSTA-API)
+// ===============================
+
+async function guardedImageDownloader(ctx, kind, prettyName) {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  }
+
+  if (!deductCredits(user)) {
+    return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+  }
+
+  const url = (ctx.match || '').trim();
+  if (!url) {
+    user.credits += 1;
+    return sendFormattedMessage(ctx, `❌ Usage: /${kind}dl <url>\nExample: /${kind}dl https://...\n💳 1 credit refunded`);
+  }
+
+  await sendFormattedMessage(ctx, `🖼️ Fetching ${prettyName} media...`);
+
+  try {
+    const r = await tobiDownloadImages(kind === 'tw' ? 'twitter' : (kind === 'pin' ? 'pinterest' : 'instagram'), url);
+
+    if (!r.urls || !r.urls.length) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, `❌ No images found.\n💳 1 credit refunded`);
+    }
+
+    const cap = `✅ ${prettyName} Images\n🔗 ${r.resolved}`;
+    await sendImagesAsAlbum(ctx, r.urls, cap);
+
+    // If more than 10 images, send remaining as links
+    if (r.urls.length > 10) {
+      const rest = r.urls.slice(10);
+      await sendLongOrFile(ctx, `🧾 More Images (${rest.length})\n\n${rest.join('\n')}`, `${prettyName}_more`);
+    }
+
+    user.totalQueries++;
+    return true;
+  } catch (e) {
+    console.error(`${prettyName} downloader error:`, e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, `❌ Failed to fetch ${prettyName} media.\n💳 1 credit refunded`);
+  }
+}
+
+// Commands (separate as requested)
+bot.command('igdl', (ctx) => guardedImageDownloader(ctx, 'ig', 'Instagram'));
+bot.command('pindl', (ctx) => guardedImageDownloader(ctx, 'pin', 'Pinterest'));
+bot.command('twtdl', (ctx) => guardedImageDownloader(ctx, 'tw', 'Twitter/X'));
 
 // OSINT Commands
 bot.command('ip', async (ctx) => {
@@ -2347,9 +2589,26 @@ bot.command('igreels', async (ctx) => {
     return;
   }
 
-  const username = ctx.match;
-  if (!username) {
-    await sendFormattedMessage(ctx, '🎞️ Usage: /igreels <Instagram username>\n\nExample: /igreels indiangamedevv');
+  const input = (ctx.match || '').trim();
+  if (!input) {
+    await sendFormattedMessage(ctx, '🎞️ Usage: /igreels <Instagram username or profile URL>\n\nExample: /igreels indiangamedevv\nExample: /igreels https://instagram.com/indiangamedevv');
+    return;
+  }
+
+  // Accept @username or profile URL
+  let username = input.replace(/^@/, '');
+  try {
+    if (/https?:\/\//i.test(input)) {
+      const u = new URL(input);
+      // /username/...
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (parts[0]) username = parts[0];
+    }
+  } catch (_) {}
+
+  if (!username || username.length < 2) {
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ Invalid username.\n💳 1 credit refunded');
     return;
   }
 
@@ -2367,11 +2626,11 @@ ${JSON.stringify(result.data, null, 2)}
 
 • 1 credit deducted from your balance`;
 
-      await sendFormattedMessage(ctx, response);
+      await sendLongOrFile(ctx, response, `igreels_${username}`);
       user.totalQueries++;
     } else {
       user.credits += 1;
-      await sendFormattedMessage(ctx, '❌ Failed to fetch reels/posts information.\n💳 1 credit refunded');
+      await sendFormattedMessage(ctx, `❌ Failed to fetch reels/posts information.\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in igreels command:', error);
@@ -2517,6 +2776,92 @@ bot.command('bin', async (ctx) => {
     // Refund credit on error
     user.credits += 1;
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up BIN information.\n💳 1 credit refunded');
+  }
+});
+
+bot.command('deepbin', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const bin = (ctx.match || '').trim();
+  if (!bin) {
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '💳 Usage: /deepbin <6-10 digit BIN>\nExample: /deepbin 400191\n💳 1 credit refunded');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🔍 Fetching Deep BIN information...');
+
+  try {
+    const result = await getDeepBinInfo(bin);
+
+    if (result.success && result.data) {
+      const response = `💳 Deep BIN Results 💳
+
+\`\`\`json
+${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch Deep BIN info.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in deepbin command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching Deep BIN info.\n💳 1 credit refunded');
+  }
+});
+
+bot.command('tempmail', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '📨 Generating temp email...');
+
+  try {
+    const result = await getTempMailStatus();
+    if (result.success && result.data) {
+      const response = `📨 TempMail API 📧
+
+\`\`\`json
+${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+✅ Use the *generated_email* (or *quick_email*) for signups.
+⚠️ This API only exposes generation/status at the root endpoint (no inbox endpoints shown).
+
+• 1 credit deducted from your balance`;
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to generate temp mail.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in tempmail command:', error);
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while generating temp mail.\n💳 1 credit refunded');
   }
 });
 
