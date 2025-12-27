@@ -1490,7 +1490,7 @@ async function sendApprovedWelcome(ctx, user) {
 🤖 *Bot Info*
 • Name: *${escapeMd(botName)}*
 • Status: ✅ Online
-• Version: \`v7\`
+• Version: \`v8\`
 
 💳 *Credits:* *${user.credits}* 🪙
 ${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
@@ -1587,6 +1587,9 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /igdl <url> — Instagram images (posts)
 • /pindl <url> — Pinterest images
 • /twtdl <url> — Twitter/X images
+• /ai <text> — AI chat (GPT-5)
+• /spotify <url> — Spotify track download
+• /yt <url> — YouTube downloader
 `;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
@@ -1617,7 +1620,12 @@ bot.callbackQuery("menu_help", async (ctx) => {
 • If buttons freeze, tap again (Telegram bug)
 • If you get "join channel" lock, join and press Verify
 
-⚠️ *Educational purpose only*`;
+⚠️ *Educational purpose only*
+
+📥 *New in v8*
+• /ai <text>
+• /spotify <url>
+• /yt <url>`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
@@ -3478,6 +3486,11 @@ bot.command('help', async (ctx) => {
 📱 Device & Network:
 • /ip <address> - IP geolocation and intelligence
 • /bin <number> - Bank Identification Number lookup
+
+🤖 AI & Media:
+• /ai <text> - GPT-5 text AI
+• /spotify <url> - Spotify track download
+• /yt <url> - YouTube downloader
 
 👤 Social & Contact:
 • /email <email> - Email validation and analysis
