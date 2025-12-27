@@ -2303,112 +2303,97 @@ bot.command('yt', async (ctx) => {
     return sendFormattedMessage(ctx, '🎬 Usage: /yt <youtube url>');
   }
 
-  await sendFormattedMessage(ctx, '🎬 Fetching YouTube video...');
-
-  const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(url)}`;
-
-  // A helper to pull possible format objects from various API shapes.
-  const getFormats = (data) => {
-    const out = [];
-    if (!data || typeof data !== 'object') return out;
-
-    const pushArr = (arr) => {
-      if (Array.isArray(arr)) arr.forEach(x => x && typeof x === 'object' && out.push(x));
-    };
-
-    pushArr(data.formats);
-    pushArr(data.format);
-    pushArr(data.links);
-    pushArr(data.downloads);
-    if (data.result && typeof data.result === 'object') {
-      pushArr(data.result.formats);
-      pushArr(data.result.links);
-      pushArr(data.result.downloads);
-    }
-    return out;
-  };
-
-  const scoreFormat = (f) => {
-    const u = String(f.url || f.link || f.download || f.download_url || f.dl || '').toLowerCase();
-    const ext = String(f.ext || f.container || f.format || f.mime || f.mimeType || '').toLowerCase();
-    const note = String(f.note || f.type || f.quality || f.qualityLabel || f.name || '').toLowerCase();
-    const hasAudio = f.hasAudio === true || note.includes('audio') || note.includes('mux') || note.includes('progressive');
-    const videoOnly = note.includes('video only') || note.includes('video-only') || f.hasAudio === false;
-
-    let s = 0;
-    if (u.includes('.mp4') || ext.includes('mp4')) s += 60;
-    if (ext.includes('webm')) s -= 10;
-    if (hasAudio) s += 50;
-    if (videoOnly) s -= 80;
-    if (note.includes('mux') || note.includes('progressive')) s += 20;
-    if (note.includes('1080')) s += 18;
-    if (note.includes('720')) s += 12;
-    if (note.includes('480')) s += 6;
-
-    const q = parseInt(String(f.height || f.quality || f.itag || '').replace(/[^\d]/g, ''), 10);
-    if (!Number.isNaN(q)) s += Math.min(20, Math.floor(q / 60));
-
-    // Prefer direct CDN-ish links over "watch"/redirect pages.
-    if (u.includes('youtube.com/watch') || u.includes('youtu.be/')) s -= 40;
-
-    return s;
-  };
+  await sendFormattedMessage(ctx, '🎬 Fetching YouTube download...');
 
   try {
-    const res = await fetchWithRetry(api, { method: 'GET' }, 3);
-    const data = await res.json();
+    const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(url)}`;
+    const res = await axiosGetWithRetry(api, { timeout: 45000 }, 2);
+    const raw = res.data || {};
+    const data = raw?.result || raw?.data || raw;
 
-    const formats = getFormats(data);
+    // Collect URLs, but strongly prefer real media URLs (avoid description links like starbucks, youtube watch, etc.)
+    const allUrls = findAllUrlsDeep(data);
 
-    // Collect candidate URLs from formats first
-    const candidates = formats
-      .map(f => ({
-        url: f.url || f.link || f.download || f.download_url || f.dl,
-        score: scoreFormat(f),
-      }))
-      .filter(x => x.url && typeof x.url === 'string');
+    const isLikelyMedia = (u) => {
+      const s = String(u || '');
+      if (!isHttpUrl(s)) return false;
+      // Exclude common non-media links that may appear in description/metadata
+      if (/starbucks\.app\.link|twitter\.com|tiktok\.com|instagram\.com|facebook\.com|youtu\.be\/(?!.*videoplayback)|youtube\.com\/(watch|shorts|channel|@)/i.test(s)) return false;
+      // Prefer googlevideo / videoplayback / mime video
+      return (
+        /googlevideo\.com|videoplayback/i.test(s) ||
+        /\.mp4(\?|$)/i.test(s) ||
+        /mime=video/i.test(s) ||
+        /\/video\//i.test(s)
+      );
+    };
 
-    // Fallback common single-url keys
-    const fallbackUrl =
-      data?.download || data?.video || data?.url ||
-      data?.result?.download || data?.result?.video || data?.result?.url ||
-      null;
+    const scoreMedia = (u) => {
+      const s = String(u || '').toLowerCase();
+      let score = 0;
+      if (/googlevideo\.com|videoplayback/.test(s)) score += 200;
+      if (/mime=video/.test(s)) score += 120;
+      if (/mime=video%2fmp4|video%2fmp4|\.mp4(\?|$)/.test(s)) score += 100;
+      // Prefer "progressive"/muxed hints if present
+      if (/progressive|mux|withaudio|audio=1|hasaudio/.test(s)) score += 60;
+      // Slightly prefer links with "ratebypass" (often smoother)
+      if (/ratebypass/.test(s)) score += 10;
+      // Penalize obvious thumbnails
+      if (/thumb|thumbnail|hqdefault|mqdefault|sddefault|maxresdefault/.test(s)) score -= 120;
+      return score;
+    };
 
-    if (fallbackUrl && typeof fallbackUrl === 'string') {
-      candidates.push({ url: fallbackUrl, score: 5 });
-    }
+    // Some APIs expose direct media url keys
+    const directCandidates = [
+      data?.download,
+      data?.downloadUrl,
+      data?.download_url,
+      data?.video,
+      data?.videoUrl,
+      data?.video_url,
+      data?.url,
+      data?.link,
+      data?.mp4,
+      data?.mp4Url,
+      data?.mp4_url,
+    ].filter(Boolean);
 
-    if (!candidates.length) {
+    const candidates = [...directCandidates, ...allUrls].filter(isLikelyMedia);
+
+    // As a last resort (if API doesn't expose media URLs cleanly), keep mp4s from the full response,
+    // but still avoid obvious metadata links.
+    const fallbackMp4s = findAllUrlsDeep(raw).filter(u => /\.mp4(\?|$)/i.test(String(u || '')));
+    const finalCandidates = candidates.length ? candidates : fallbackMp4s;
+
+    // Pick best scored
+    const chosen = (finalCandidates || []).sort((a, b) => scoreMedia(b) - scoreMedia(a))[0] || null;
+
+    if (!isHttpUrl(chosen)) {
       user.credits += 1;
-      return sendFormattedMessage(ctx, '❌ No downloadable video found.\n💳 1 credit refunded');
+      return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
     }
 
-    // Choose best (prefer muxed/progressive MP4 with audio)
-    candidates.sort((a, b) => b.score - a.score);
-    const chosen = candidates[0].url;
+    user.totalQueries++;
 
-    // Try to send as VIDEO (best UX: plays with audio if muxed)
+    // Send as VIDEO (so Telegram plays with audio if link is muxed/progressive)
     try {
-      await ctx.replyWithVideo(chosen, {
-        supports_streaming: true,
-        caption: '🎬 YouTube Video',
-      });
+      await ctx.replyWithVideo(chosen, { caption: '🎬 YouTube Video', supports_streaming: true });
     } catch (sendErr) {
-      // If Telegram cannot fetch/stream it, still provide link (no preview)
-      await ctx.reply(`⬇️ Video link:\n${chosen}`, { disable_web_page_preview: true });
+      // If Telegram can't fetch or the file is too big, send link as plain text (no preview)
+      await ctx.reply(`🎬 Video link:\n${chosen}`, { disable_web_page_preview: true });
     }
 
-    // Send more options one-by-one (no preview)
-    const more = [...new Set(candidates.map(x => x.url))].filter(u => u !== chosen).slice(0, 6);
-    for (const u of more) {
+    // Send extra options one-by-one as links (no preview)
+    const extras = (finalCandidates || []).filter(u => u !== chosen).slice(0, 5);
+    for (const u of extras) {
       await ctx.reply(`⬇️ Option link:\n${u}`, { disable_web_page_preview: true });
     }
 
     return true;
   } catch (e) {
-    console.error('yt error:', e?.message || e);
+    console.error('yt error:', e?.response?.status, e?.message || e);
     user.credits += 1;
-    return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.\n💳 1 credit refunded');
+    return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.');
   }
 });
 
