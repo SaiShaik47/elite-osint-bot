@@ -1010,6 +1010,21 @@ async function getVehicleInfo(vehicleNumber) {
   }
 }
 
+// ===============================
+// VEHICLE RC INFO (ADVANCED)
+// ===============================
+async function getRcInfo(query) {
+  try {
+    const apiKey = 'xspydox'; // Provided key
+    const url = `https://vehicle-advance-info-spydox.vercel.app/?q=${encodeURIComponent(query)}&apikey=${apiKey}`;
+    const res = await axiosGetWithRetry(url, { timeout: 25000 }, 3);
+    return { success: true, data: res.data, api: url };
+  } catch (error) {
+    console.error('RC API error:', error?.message || error);
+    return { success: false, error: 'Failed to fetch RC information' };
+  }
+}
+
 async function getFreeFireStats(uid) {
   try {
     const response = await axios.get(`https://anku-ffapi-inky.vercel.app/ff?uid=${uid}`);
@@ -2404,6 +2419,7 @@ bot.callbackQuery("menu_osint", async (ctx) => {
 • /deepbin <bin> — Deep BIN info (stormx)
 • /tempmail — TempMail generator
 • /vehicle <number> — Vehicle details
+• /rc <number> — Vehicle RC (advanced)
 • /ff <uid> — Free Fire stats`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
@@ -4884,6 +4900,54 @@ bot.callbackQuery('tm_refresh', async (ctx) => {
     return safeEditOrReply(ctx, '❌ Failed to refresh inbox. Try /tempmail inbox or /tempmail new.', tempmailInlineKeyboard());
   }
 });
+bot.command('rc', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const q = ctx.match;
+  if (!q) {
+    refundCredits(user, 1);
+    await sendFormattedMessage(ctx, '🚗 Usage: /rc <vehicle number>\n\nExample: /rc MH02FZ0555\n💳 1 credit refunded');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🔍 Fetching RC details...');
+
+  try {
+    const result = await getRcInfo(q.toString());
+
+    if (result.success && result.data) {
+      const response = `🚘 RC Details Results 🚘
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Vehicle RC information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      refundCredits(user, 1);
+      await sendFormattedMessage(ctx, '❌ Failed to fetch RC details. Please check the vehicle number and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in rc command:', error);
+    refundCredits(user, 1);
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching RC details.\n💳 1 credit refunded');
+  }
+});
+
 bot.command('vehicle', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
@@ -5153,6 +5217,7 @@ bot.command('help', async (ctx) => {
 
 🚗 Vehicle & Gaming:
 • /vehicle <number> - Vehicle registration details
+• /rc <number> - Vehicle RC details (advanced)
 • /ff <uid> - Free Fire player statistics
 
 📱 Social Media Video Downloaders:
@@ -5194,6 +5259,7 @@ bot.command('help', async (ctx) => {
 • /igreels indiangamedevv
 • /pan ABCDE1234F
 • /tginfo 7712689923
+• /rc MH02FZ0555
 • /dl https://www.instagram.com/reel/DSSvFDgjU3s/
 • /snap https://snapchat.com/t/H2D8zTxt
 • /pin https://pin.it/4gsJMxtt1
