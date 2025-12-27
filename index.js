@@ -139,12 +139,6 @@ if (!botToken) {
 const bot = new Bot(botToken);
 
 // ===============================
-// YouTube Jobs (for non-blocking progress + stop button)
-// ===============================
-if (!global.__ytJobs) global.__ytJobs = new Map();
-
-
-// ===============================
 // BAN MIDDLEWARE (blocks banned users globally)
 // ===============================
 bot.use(async (ctx, next) => {
@@ -183,13 +177,6 @@ const ADMIN_AUDIT_CHANNEL = process.env.ADMIN_AUDIT_CHANNEL || process.env.ADMIN
 
 // Send a compact admin audit entry (best-effort)
 async function adminAudit(action, ctx, details = '') {
-  global.__adminAudit = global.__adminAudit || [];
-  try {
-    const ts = new Date();
-    global.__adminAudit.push({ ts: ts.toISOString(), action: String(action || ''), by: String(ctx?.from?.id || ''), chat: String(ctx?.chat?.id || ''), details: String(details || '') });
-    if (global.__adminAudit.length > 500) global.__adminAudit.splice(0, global.__adminAudit.length - 500);
-  } catch (_) {}
-
   try {
     if (!ADMIN_AUDIT_CHANNEL) return;
     const user = ctx?.from || {};
@@ -1597,33 +1584,19 @@ function isTruthyOff(v) {
 
 // Resolve a user identifier: numeric ID or @username
 async function resolveUserId(identifier) {
-  const raw0 = String(identifier || '').trim();
-  if (!raw0) return null;
-
-  const raw = raw0.replace(/^<|>$/g, '').trim();
+  const raw = String(identifier || '').trim();
+  if (!raw) return null;
 
   // numeric
-  if (/^\d+$/.test(raw)) return raw;
+  if (/^\\d+$/.test(raw)) return raw;
 
-  // username (with or without @)
-  const uname = raw.startsWith('@') ? raw.slice(1) : raw;
-  if (uname && /^[a-zA-Z0-9_]{4,32}$/.test(uname)) {
-    // 1) Try Telegram lookup (works only if resolvable)
+  // @username
+  if (raw.startsWith('@')) {
     try {
-      const chat = await bot.api.getChat('@' + uname);
+      const chat = await bot.api.getChat(raw);
       if (chat?.id) return String(chat.id);
     } catch (_) {}
-
-    // 2) Fallback to local in-memory users map (users who interacted with the bot)
-    try {
-      const needle = uname.toLowerCase();
-      for (const [uid, u] of users.entries()) {
-        const uName = String(u?.username || '').replace(/^@/, '').toLowerCase();
-        if (uName && uName === needle) return String(u?.telegramId || uid);
-      }
-    } catch (_) {}
   }
-
   return null;
 }
 
@@ -1631,36 +1604,16 @@ bot.command('ban', async (ctx) => {
   const caller = String(ctx.from?.id || '');
   if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
 
-const args = String(getCommandArgs(ctx) || '').trim();
-const replyTarget = ctx.message?.reply_to_message?.from?.id ? String(ctx.message.reply_to_message.from.id) : null;
+  const args = String(getCommandArgs(ctx) || '').trim();
+  if (!args) return ctx.reply('❌ Usage: /ban <userId|@username> [reason]');
 
-let targetId = null;
-let reason = '';
+  const [targetRaw, ...reasonParts] = args.split(/\\s+/);
+  const targetId = await resolveUserId(targetRaw);
+  if (!targetId) return ctx.reply('❌ Could not resolve that user. Use numeric ID or @username.');
 
-if (!args) {
-  if (!replyTarget) return ctx.reply('❌ Usage: /ban <userId|@username> [reason]\n(or reply to a user message and use /ban [reason])');
-  targetId = replyTarget;
-} else {
-  const parts = args.split(/\s+/).filter(Boolean);
+  if (isAdmin(targetId)) return ctx.reply('❌ You cannot ban an admin.');
 
-  // If admin replied to a user and first token is NOT an identifier, treat whole args as reason
-  const first = parts[0] || '';
-  const looksLikeId = /^\d+$/.test(first) || first.startsWith('@');
-
-  if (replyTarget && !looksLikeId) {
-    targetId = replyTarget;
-    reason = args;
-  } else {
-    const targetRaw = first;
-    reason = parts.slice(1).join(' ').trim();
-    targetId = await resolveUserId(targetRaw);
-    if (!targetId) {
-      return ctx.reply('❌ Could not resolve that user.\n✅ Try one of these:\n• Reply to the user’s message and send /ban [reason]\n• Use numeric ID\n• Use @username (works if the user has started the bot)');
-    }
-  }
-}
-
-if (isAdmin(targetId)) return ctx.reply('❌ You cannot ban an admin.');
+  const reason = reasonParts.join(' ').trim();
   const at = new Date().toISOString();
   bannedUsers.set(String(targetId), { by: caller, at, reason });
 
@@ -1678,20 +1631,11 @@ bot.command('unban', async (ctx) => {
   const caller = String(ctx.from?.id || '');
   if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
 
-const args = String(getCommandArgs(ctx) || '').trim();
-const replyTarget = ctx.message?.reply_to_message?.from?.id ? String(ctx.message.reply_to_message.from.id) : null;
+  const args = String(getCommandArgs(ctx) || '').trim();
+  if (!args) return ctx.reply('❌ Usage: /unban <userId|@username>');
 
-let targetId = null;
-if (!args) {
-  if (!replyTarget) return ctx.reply('❌ Usage: /unban <userId|@username>\n(or reply to a user message and use /unban)');
-  targetId = replyTarget;
-} else {
-  targetId = await resolveUserId(args.split(/\s+/)[0]);
-  if (!targetId) {
-    return ctx.reply('❌ Could not resolve that user.\n✅ Try replying to the user’s message and sending /unban, or use numeric ID / @username.');
-  }
-}
-
+  const targetId = await resolveUserId(args.split(/\\s+/)[0]);
+  if (!targetId) return ctx.reply('❌ Could not resolve that user. Use numeric ID or @username.');
 
   const existed = bannedUsers.delete(String(targetId));
 
@@ -1718,42 +1662,7 @@ bot.command('autoregister', async (ctx) => {
   else return ctx.reply('❌ Usage: /autoregister on | off');
 
   return ctx.reply(`✅ Auto-register is now: *${autoRegisterEnabled ? 'ON' : 'OFF'}*`, { parse_mode: 'Markdown' });
-});bot.command('adminaudit', async (ctx) => {
-  const caller = String(ctx.from?.id || '');
-  if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
-
-  const args = String(getCommandArgs(ctx) || '').trim();
-  const n = Math.max(1, Math.min(200, parseInt(args || '30', 10) || 30));
-
-  const list = Array.isArray(global.__adminAudit) ? global.__adminAudit.slice(-n) : [];
-  if (!list.length) return ctx.reply('ℹ️ No audit entries yet.');
-
-  const fmt = (iso) => {
-    try {
-      return new Intl.DateTimeFormat('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-        hour12: true
-      }).format(new Date(iso));
-    } catch (_) {
-      return iso;
-    }
-  };
-
-  const lines = [];
-  lines.push(`ADMIN AUDIT (last ${list.length})`);
-  lines.push('----------------------------------------');
-  for (const e of list) {
-    lines.push(`[${fmt(e.ts)}] ${e.action} | by=${e.by} | chat=${e.chat}${e.details ? ` | ${e.details}` : ''}`);
-  }
-
-  const out = lines.join('\n');
-  // Telegram message limit safety
-  const chunk = out.length > 3800 ? out.slice(-3800) : out;
-  return ctx.reply(`<pre>${escapeHtml(chunk)}</pre>`, { parse_mode: 'HTML' });
 });
-
 
 bot.command('approveall', async (ctx) => {
   const caller = String(ctx.from?.id || '');
@@ -2804,25 +2713,6 @@ async function generateAndSendImage(ctx, user, state, { replaceMessageId = null 
   await adminAudit('imggen', ctx, `prompt="${prompt}" improve=${!!state?.improve} format=${state?.format || ''}`);
 }
 
-// Image gen commands
-async function handleImgGenCommand(ctx) {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) return;
-
-  const prompt = String(getCommandArgs(ctx) || '').trim();
-  if (!prompt) return ctx.reply('❌ Usage: /img <prompt>\nExample: /img spiderman');
-
-  recordCommandUse(user, 'img');
-  const key = `${ctx.chat.id}:${ctx.from.id}`;
-  const state = { prompt, improve: false, format: 'square', random: '' };
-  global.__imgCache.set(key, state);
-
-  return generateAndSendImage(ctx, state);
-}
-
-bot.command('img', handleImgGenCommand);
-bot.command('imggen', handleImgGenCommand);
-
 // Inline buttons handler
 bot.callbackQuery(/^imgopt_(improve|wide|random)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (_) {}
@@ -3275,46 +3165,10 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
     try { return await ctx.reply('❌ This quality is not available for this video.'); } catch (_) { return; }
   }
 
-  
-// If it's a ytcontent "videoProcess" URL, poll progress in the background (NON-BLOCKING) + provide a Stop button.
-if (/ytcontent\.net\/v3\/videoProcess\//i.test(url)) {
-  const baseKey = `${ctx.chat.id}:${ctx.from.id}`;
-
-  // Cancel any existing job for this user/chat
-  const prev = global.__ytJobs.get(baseKey);
-  if (prev) prev.cancelled = true;
-
-  const jobId = `${baseKey}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-  const stopKb = new InlineKeyboard().text('⛔ Stop', `ytstop_${jobId}`);
-
-  // Send initial progress message (we will keep editing this)
-  let msg = null;
-  try {
-    msg = await ctx.reply(
-      formatYtProcessHtml({ percent: '0%', fileUrl: 'In Processing...' }, url, { speedText: '…', etaText: '…' }),
-      { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: stopKb }
-    );
-  } catch (_) {}
-
-  const job = {
-    jobId,
-    baseKey,
-    chatId: ctx.chat.id,
-    userId: ctx.from.id,
-    messageId: msg?.message_id || null,
-    quality: q,
-    processUrl: url,
-    cancelled: false,
-    startedAt: Date.now()
-  };
-
-  global.__ytJobs.set(baseKey, job);
-  global.__ytJobs.set(jobId, job);
-
-  // Background runner (do NOT await)
-  (async () => {
+  // If it's a ytcontent "videoProcess" URL, poll and keep editing the same message with % + ETA + speed.
+  if (/ytcontent\.net\/v3\/videoProcess\//i.test(url)) {
     const intervalMs = 2500;
-    const maxTries = 120; // ~5 min
+    const maxTries = 90; // ~3.75 min
 
     let lastPct = null;
     let lastT = Date.now();
@@ -3329,147 +3183,92 @@ if (/ytcontent\.net\/v3\/videoProcess\//i.test(url)) {
     }
     function fmtSpeed(bps) {
       if (!isFinite(bps) || bps <= 0) return '…';
-      const units = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-      let u = 0;
-      let v = bps;
-      while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
-      return `${v.toFixed(2)} ${units[u]}`;
+      const mbps = bps / (1024 * 1024);
+      return `${mbps.toFixed(2)} MB/s`;
     }
 
-    try {
-      for (let i = 0; i < maxTries; i++) {
-        if (job.cancelled) {
-          if (job.messageId) {
-            try {
-              await ctx.api.editMessageText(
-                job.chatId,
-                job.messageId,
-                '⛔ <b>Download stopped.</b>\n\nRun /yt again to restart.',
-                { parse_mode: 'HTML', disable_web_page_preview: true }
-              );
-            } catch (_) {}
-          }
-          return;
-        }
-
-        const res = await axiosGetWithRetry(job.processUrl, { timeout: 45000, responseType: 'json' }, 2);
-        const data = res.data || {};
-
-        const fileUrl = data.fileUrl || data.url || data.download || data.download_url || null;
-        const percentRaw = data.percent || data.progress || data.percentage || data.status || '…';
-        const m = String(percentRaw).match(/(\d+(\.\d+)?)/);
-        const pct = m ? parseFloat(m[1]) : null;
-
-        const totalBytes =
-          (typeof data?.fileSizeBytes === 'number' && data.fileSizeBytes) ||
-          (typeof data?.fileSize === 'number' && data.fileSize) ||
-          (typeof data?.estimatedFileSizeBytes === 'number' && data.estimatedFileSizeBytes) ||
-          lastTotalBytes ||
-          null;
-        if (totalBytes) lastTotalBytes = totalBytes;
-
-        // ready
-        if (typeof fileUrl === 'string' && /^https?:\/\//i.test(fileUrl) && !/in\s*processing/i.test(fileUrl)) {
-          if (job.messageId) {
-            try {
-              await ctx.api.editMessageText(
-                job.chatId,
-                job.messageId,
-                `✅ <b>YouTube ${escapeHtml(String(job.quality))}p ready</b>\n\n⬇️ <b>Download URL:</b>\n<code>${escapeHtml(fileUrl)}</code>`,
-                { parse_mode: 'HTML', disable_web_page_preview: true }
-              );
-            } catch (_) {}
-          } else {
-            try {
-              await ctx.api.sendMessage(
-                job.chatId,
-                `✅ *YouTube ${job.quality}p*\n\n⬇️ Download URL:\n${fileUrl}`,
-                { parse_mode: 'Markdown', disable_web_page_preview: true }
-              );
-            } catch (_) {}
-          }
-
-          try {
-            await sendVideoSmart({ ...ctx, chat: { id: job.chatId } }, fileUrl, `🎬 YouTube ${job.quality}p`);
-          } catch (_) {}
-
-          try { await adminAudit('yt_download_ready', ctx, `${job.quality}p | ${fileUrl}`); } catch (_) {}
-          return;
-        }
-
-        // compute speed/eta from percent delta
-        let speedText = '…';
-        let etaText = '…';
-        const now = Date.now();
-        const dtSec = Math.max(0.001, (now - lastT) / 1000);
-
-        if (pct != null && lastPct != null && pct > lastPct) {
-          const ratePctPerSec = (pct - lastPct) / dtSec;
-          etaText = fmtEta((100 - pct) / ratePctPerSec);
-
-          if (totalBytes) {
-            const downloadedNow = totalBytes * (pct / 100);
-            const downloadedPrev = totalBytes * (lastPct / 100);
-            const bps = (downloadedNow - downloadedPrev) / dtSec;
-            speedText = fmtSpeed(bps);
-          } else {
-            speedText = `${ratePctPerSec.toFixed(2)} %/s`;
-          }
-        }
-
-        lastPct = pct;
-        lastT = now;
-
-        if (job.messageId) {
-          try {
-            await ctx.api.editMessageText(
-              job.chatId,
-              job.messageId,
-              formatYtProcessHtml(data, job.processUrl, { speedText, etaText }),
-              { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: stopKb }
-            );
-          } catch (_) {}
-        }
-
-        await sleep(intervalMs);
+    for (let i = 0; i < maxTries; i++) {
+      let data = {};
+      try {
+        const r = await axiosGetWithRetry(url, { timeout: 45000, responseType: 'json' }, 2);
+        data = r.data || {};
+      } catch (_) {
+        data = { percent: lastPct != null ? `${lastPct}%` : '…' };
       }
 
-      if (job.messageId) {
-        try {
-          await ctx.api.editMessageText(
-            job.chatId,
-            job.messageId,
-            '❌ <b>Processing timed out.</b>\n\nTry again later.',
-            { parse_mode: 'HTML', disable_web_page_preview: true }
-          );
-        } catch (_) {}
+      const percentRaw = data?.percent ?? data?.progress ?? '…';
+      const m = String(percentRaw).match(/(\d+(\.\d+)?)/);
+      const pct = m ? parseFloat(m[1]) : null;
+
+      // total bytes (best-effort)
+      const totalBytes =
+        (typeof data?.fileSizeBytes === 'number' && data.fileSizeBytes) ||
+        (typeof data?.fileSize === 'number' && data.fileSize) ||
+        (typeof data?.estimatedFileSizeBytes === 'number' && data.estimatedFileSizeBytes) ||
+        lastTotalBytes ||
+        null;
+      if (totalBytes) lastTotalBytes = totalBytes;
+
+      // compute speed and eta from percent delta
+      const now = Date.now();
+      const dtSec = Math.max(0.001, (now - lastT) / 1000);
+
+      let speedText = '';
+      let etaText = '';
+
+      if (pct != null && lastPct != null && pct > lastPct) {
+        const ratePctPerSec = (pct - lastPct) / dtSec;
+        etaText = fmtEta((100 - pct) / ratePctPerSec);
+
+        if (totalBytes) {
+          const downloadedNow = totalBytes * (pct / 100);
+          const downloadedPrev = totalBytes * (lastPct / 100);
+          const bps = (downloadedNow - downloadedPrev) / dtSec;
+          speedText = fmtSpeed(bps);
+        } else {
+          // fallback: show %/s as "speed"
+          speedText = `${ratePctPerSec.toFixed(2)} %/s`;
+        }
       } else {
-        try { await ctx.api.sendMessage(job.chatId, '❌ Processing timed out. Try again later.'); } catch (_) {}
+        speedText = '…';
+        etaText = '…';
       }
-    } catch (e) {
-      if (job.messageId) {
-        try {
-          await ctx.api.editMessageText(
-            job.chatId,
-            job.messageId,
-            '❌ <b>Download failed.</b> Try again later.',
-            { parse_mode: 'HTML', disable_web_page_preview: true }
-          );
-        } catch (_) {}
-      } else {
-        try { await ctx.api.sendMessage(job.chatId, '❌ Download failed. Try again later.'); } catch (_) {}
+
+      // Update message
+      try {
+        await ctx.editMessageText(
+          formatYtProcessHtml(data, url, { speedText, etaText }),
+          { parse_mode: 'HTML', disable_web_page_preview: true }
+        );
+      } catch (_) {
+        // ignore edit errors (e.g., message too old)
       }
-    } finally {
-      global.__ytJobs.delete(job.baseKey);
-      global.__ytJobs.delete(job.jobId);
+
+      lastT = now;
+      if (pct != null) lastPct = pct;
+
+      const fileUrl = data.fileUrl || data.url || data.download || data.download_url || null;
+      const ready = typeof fileUrl === 'string' && /^https?:\/\//i.test(fileUrl) && !/in\s*processing/i.test(fileUrl);
+
+      if (ready) {
+        await ctx.reply(
+          `✅ *${q}p Ready!*\n\n⬇️ File URL:\n${fileUrl}`,
+          { parse_mode: 'Markdown', disable_web_page_preview: true }
+        );
+        try { await sendVideoSmart(ctx, fileUrl, `🎬 YouTube ${q}p`); } catch (_) {}
+        await adminAudit('yt_download_ready', ctx, `${q}p | ${fileUrl}`);
+        return;
+      }
+
+      await sleep(intervalMs);
     }
-  })();
 
-  // Return immediately so the bot stays responsive for everyone
-  return;
-}
+    // Timed out
+    await ctx.reply('❌ Processing timed out. Try again later.');
+    return;
+  }
 
-// Direct URL (already ready)
+  // Direct URL (already ready)
   await ctx.reply(
     `✅ *YouTube ${q}p*\n\n⬇️ Download URL:\n${url}`,
     { parse_mode: 'Markdown', disable_web_page_preview: true }
@@ -3479,41 +3278,6 @@ if (/ytcontent\.net\/v3\/videoProcess\//i.test(url)) {
 });
 
 
-
-
-// Stop an active YT processing job
-bot.callbackQuery(/^ytstop_(.+)$/, async (ctx) => {
-  try { await ctx.answerCallbackQuery('Stopping…'); } catch (_) {}
-
-  const jobId = ctx.match?.[1];
-  const job = (global.__ytJobs && global.__ytJobs.get(jobId)) || null;
-
-  if (!job) {
-    try { await ctx.reply('❌ No active download to stop.'); } catch (_) {}
-    return;
-  }
-
-  const caller = String(ctx.from?.id || '');
-  if (caller !== String(job.userId) && !isAdmin(caller) && caller !== String(adminId)) {
-    try { await ctx.reply('❌ You can only stop your own download.'); } catch (_) {}
-    return;
-  }
-
-  job.cancelled = true;
-
-  if (job.messageId) {
-    try {
-      await ctx.api.editMessageText(
-        job.chatId,
-        job.messageId,
-        '⛔ <b>Stopping…</b>',
-        { parse_mode: 'HTML', disable_web_page_preview: true }
-      );
-    } catch (_) {}
-  }
-
-  try { await adminAudit('yt_download_stopped', ctx, `${job.quality}p | ${job.processUrl}`); } catch (_) {}
-});
 
 // OSINT Commands
 bot.command('ip', async (ctx) => {
