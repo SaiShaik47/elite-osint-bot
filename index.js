@@ -183,6 +183,13 @@ const ADMIN_AUDIT_CHANNEL = process.env.ADMIN_AUDIT_CHANNEL || process.env.ADMIN
 
 // Send a compact admin audit entry (best-effort)
 async function adminAudit(action, ctx, details = '') {
+  global.__adminAudit = global.__adminAudit || [];
+  try {
+    const ts = new Date();
+    global.__adminAudit.push({ ts: ts.toISOString(), action: String(action || ''), by: String(ctx?.from?.id || ''), chat: String(ctx?.chat?.id || ''), details: String(details || '') });
+    if (global.__adminAudit.length > 500) global.__adminAudit.splice(0, global.__adminAudit.length - 500);
+  } catch (_) {}
+
   try {
     if (!ADMIN_AUDIT_CHANNEL) return;
     const user = ctx?.from || {};
@@ -1590,19 +1597,33 @@ function isTruthyOff(v) {
 
 // Resolve a user identifier: numeric ID or @username
 async function resolveUserId(identifier) {
-  const raw = String(identifier || '').trim();
-  if (!raw) return null;
+  const raw0 = String(identifier || '').trim();
+  if (!raw0) return null;
+
+  const raw = raw0.replace(/^<|>$/g, '').trim();
 
   // numeric
-  if (/^\\d+$/.test(raw)) return raw;
+  if (/^\d+$/.test(raw)) return raw;
 
-  // @username
-  if (raw.startsWith('@')) {
+  // username (with or without @)
+  const uname = raw.startsWith('@') ? raw.slice(1) : raw;
+  if (uname && /^[a-zA-Z0-9_]{4,32}$/.test(uname)) {
+    // 1) Try Telegram lookup (works only if resolvable)
     try {
-      const chat = await bot.api.getChat(raw);
+      const chat = await bot.api.getChat('@' + uname);
       if (chat?.id) return String(chat.id);
     } catch (_) {}
+
+    // 2) Fallback to local in-memory users map (users who interacted with the bot)
+    try {
+      const needle = uname.toLowerCase();
+      for (const [uid, u] of users.entries()) {
+        const uName = String(u?.username || '').replace(/^@/, '').toLowerCase();
+        if (uName && uName === needle) return String(u?.telegramId || uid);
+      }
+    } catch (_) {}
   }
+
   return null;
 }
 
@@ -1610,16 +1631,36 @@ bot.command('ban', async (ctx) => {
   const caller = String(ctx.from?.id || '');
   if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
 
-  const args = String(getCommandArgs(ctx) || '').trim();
-  if (!args) return ctx.reply('❌ Usage: /ban <userId|@username> [reason]');
+const args = String(getCommandArgs(ctx) || '').trim();
+const replyTarget = ctx.message?.reply_to_message?.from?.id ? String(ctx.message.reply_to_message.from.id) : null;
 
-  const [targetRaw, ...reasonParts] = args.split(/\\s+/);
-  const targetId = await resolveUserId(targetRaw);
-  if (!targetId) return ctx.reply('❌ Could not resolve that user. Use numeric ID or @username.');
+let targetId = null;
+let reason = '';
 
-  if (isAdmin(targetId)) return ctx.reply('❌ You cannot ban an admin.');
+if (!args) {
+  if (!replyTarget) return ctx.reply('❌ Usage: /ban <userId|@username> [reason]\n(or reply to a user message and use /ban [reason])');
+  targetId = replyTarget;
+} else {
+  const parts = args.split(/\s+/).filter(Boolean);
 
-  const reason = reasonParts.join(' ').trim();
+  // If admin replied to a user and first token is NOT an identifier, treat whole args as reason
+  const first = parts[0] || '';
+  const looksLikeId = /^\d+$/.test(first) || first.startsWith('@');
+
+  if (replyTarget && !looksLikeId) {
+    targetId = replyTarget;
+    reason = args;
+  } else {
+    const targetRaw = first;
+    reason = parts.slice(1).join(' ').trim();
+    targetId = await resolveUserId(targetRaw);
+    if (!targetId) {
+      return ctx.reply('❌ Could not resolve that user.\n✅ Try one of these:\n• Reply to the user’s message and send /ban [reason]\n• Use numeric ID\n• Use @username (works if the user has started the bot)');
+    }
+  }
+}
+
+if (isAdmin(targetId)) return ctx.reply('❌ You cannot ban an admin.');
   const at = new Date().toISOString();
   bannedUsers.set(String(targetId), { by: caller, at, reason });
 
@@ -1637,9 +1678,19 @@ bot.command('unban', async (ctx) => {
   const caller = String(ctx.from?.id || '');
   if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
 
-  const args = String(getCommandArgs(ctx) || '').trim();
-  if (!args) return ctx.reply('❌ Usage: /unban <userId|@username>');
+const args = String(getCommandArgs(ctx) || '').trim();
+const replyTarget = ctx.message?.reply_to_message?.from?.id ? String(ctx.message.reply_to_message.from.id) : null;
 
+let targetId = null;
+if (!args) {
+  if (!replyTarget) return ctx.reply('❌ Usage: /unban <userId|@username>\n(or reply to a user message and use /unban)');
+  targetId = replyTarget;
+} else {
+  targetId = await resolveUserId(args.split(/\s+/)[0]);
+  if (!targetId) {
+    return ctx.reply('❌ Could not resolve that user.\n✅ Try replying to the user’s message and sending /unban, or use numeric ID / @username.');
+  }
+}
   const targetId = await resolveUserId(args.split(/\\s+/)[0]);
   if (!targetId) return ctx.reply('❌ Could not resolve that user. Use numeric ID or @username.');
 
@@ -1668,7 +1719,42 @@ bot.command('autoregister', async (ctx) => {
   else return ctx.reply('❌ Usage: /autoregister on | off');
 
   return ctx.reply(`✅ Auto-register is now: *${autoRegisterEnabled ? 'ON' : 'OFF'}*`, { parse_mode: 'Markdown' });
+});bot.command('adminaudit', async (ctx) => {
+  const caller = String(ctx.from?.id || '');
+  if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
+
+  const args = String(getCommandArgs(ctx) || '').trim();
+  const n = Math.max(1, Math.min(200, parseInt(args || '30', 10) || 30));
+
+  const list = Array.isArray(global.__adminAudit) ? global.__adminAudit.slice(-n) : [];
+  if (!list.length) return ctx.reply('ℹ️ No audit entries yet.');
+
+  const fmt = (iso) => {
+    try {
+      return new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: true
+      }).format(new Date(iso));
+    } catch (_) {
+      return iso;
+    }
+  };
+
+  const lines = [];
+  lines.push(`ADMIN AUDIT (last ${list.length})`);
+  lines.push('----------------------------------------');
+  for (const e of list) {
+    lines.push(`[${fmt(e.ts)}] ${e.action} | by=${e.by} | chat=${e.chat}${e.details ? ` | ${e.details}` : ''}`);
+  }
+
+  const out = lines.join('\n');
+  // Telegram message limit safety
+  const chunk = out.length > 3800 ? out.slice(-3800) : out;
+  return ctx.reply(`<pre>${escapeHtml(chunk)}</pre>`, { parse_mode: 'HTML' });
 });
+
 
 bot.command('approveall', async (ctx) => {
   const caller = String(ctx.from?.id || '');
@@ -2718,6 +2804,25 @@ async function generateAndSendImage(ctx, user, state, { replaceMessageId = null 
   // Audit (download-ish action)
   await adminAudit('imggen', ctx, `prompt="${prompt}" improve=${!!state?.improve} format=${state?.format || ''}`);
 }
+
+// Image gen commands
+async function handleImgGenCommand(ctx) {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return;
+
+  const prompt = String(getCommandArgs(ctx) || '').trim();
+  if (!prompt) return ctx.reply('❌ Usage: /img <prompt>\nExample: /img spiderman');
+
+  recordCommandUse(user, 'img');
+  const key = `${ctx.chat.id}:${ctx.from.id}`;
+  const state = { prompt, improve: false, format: 'square', random: '' };
+  global.__imgCache.set(key, state);
+
+  return generateAndSendImage(ctx, state);
+}
+
+bot.command('img', handleImgGenCommand);
+bot.command('imggen', handleImgGenCommand);
 
 // Inline buttons handler
 bot.callbackQuery(/^imgopt_(improve|wide|random)$/, async (ctx) => {
