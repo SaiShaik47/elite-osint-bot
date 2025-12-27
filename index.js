@@ -1,4 +1,4 @@
-const { Bot, InlineKeyboard, Api } = require('grammy');
+const { Bot, InlineKeyboard, Api, InputFile } = require('grammy');
 const axios = require('axios');
 const crypto = require('crypto');
 
@@ -2206,22 +2206,76 @@ bot.command('spotify', async (ctx) => {
     const res = await axiosGetWithRetry(api, { timeout: 35000 }, 2);
     const data = res.data || {};
 
-    // Try common keys, then deep-scan
-    let dl = null;
-    if (isHttpUrl(data.download)) dl = data.download;
-    else if (isHttpUrl(data.url)) dl = data.url;
-    else if (isHttpUrl(data.audio)) dl = data.audio;
-    else dl = findFirstUrlDeep(data);
+    // flip-apiakib.spotify response: { data: { media: [{ type:'audio', format:'mp3', url:'...' }, ...], metadata:{title,artist,...} } }
+    const media = Array.isArray(data?.data?.media) ? data.data.media : [];
+    const meta = data?.data?.metadata || {};
 
-    if (!isHttpUrl(dl)) {
+    // Prefer MP3 audio item
+    let audioUrl = null;
+    for (const m of media) {
+      if (!m) continue;
+      const t = String(m.type || '').toLowerCase();
+      const f = String(m.format || '').toLowerCase();
+      if (t === 'audio' && (f === 'mp3' || f.includes('mp3')) && isHttpUrl(m.url)) {
+        audioUrl = m.url;
+        break;
+      }
+    }
+    // Fallback: any audio url
+    if (!audioUrl) {
+      for (const m of media) {
+        const t = String(m?.type || '').toLowerCase();
+        if (t === 'audio' && isHttpUrl(m?.url)) {
+          audioUrl = m.url;
+          break;
+        }
+      }
+    }
+
+    if (!isHttpUrl(audioUrl)) {
       user.credits += 1;
-      return sendFormattedMessage(ctx, '❌ Spotify download link not found from API.');
+      return sendFormattedMessage(ctx, '❌ Spotify audio link not found from API.');
     }
 
     user.totalQueries++;
 
-    // Send as DOCUMENT to preserve quality (no Telegram audio/preview compression)
-    await ctx.replyWithDocument(dl, { caption: '🎵 Spotify Track (HD)' });
+    const title = meta?.title || 'Spotify Track';
+    const artist = meta?.artist || meta?.artists || '';
+    const caption = artist ? `🎵 ${title} — ${artist}` : `🎵 ${title}`;
+
+    // Send as AUDIO so it plays directly in chat.
+    // (Telegram may show a thumbnail, but audio will be playable.)
+    try {
+      await ctx.replyWithAudio(audioUrl, {
+        caption,
+        title: String(title).slice(0, 64),
+        performer: String(artist).slice(0, 64) || undefined,
+      });
+    } catch (sendErr) {
+      // Some hosts block Telegram from fetching the URL directly.
+      // Fallback: download into memory and upload as an actual audio file.
+      try {
+        const fileRes = await axios.get(audioUrl, {
+          responseType: 'arraybuffer',
+          timeout: 60000,
+          headers: { 'User-Agent': DEFAULT_UA },
+          maxContentLength: 50 * 1024 * 1024,
+          maxBodyLength: 50 * 1024 * 1024,
+        });
+        const buf = Buffer.from(fileRes.data);
+        const safeTitle = String(title || 'spotify').replace(/[^a-z0-9\-_. ]/gi, '').trim().slice(0, 40) || 'spotify';
+        const filename = `${safeTitle}.mp3`;
+
+        await ctx.replyWithAudio(new InputFile(buf, filename), {
+          caption,
+          title: String(title).slice(0, 64),
+          performer: String(artist).slice(0, 64) || undefined,
+        });
+      } catch (dlErr) {
+        // Last resort: send as document link
+        await ctx.replyWithDocument(audioUrl, { caption: `${caption}\n\n(Direct audio failed, download this file.)` });
+      }
+    }
     return true;
   } catch (e) {
     console.error('spotify error:', e?.message || e);
@@ -2249,21 +2303,35 @@ bot.command('yt', async (ctx) => {
     const res = await axiosGetWithRetry(api, { timeout: 45000 }, 2);
     const data = res.data || {};
 
-    let dl = null;
-    if (isHttpUrl(data.download)) dl = data.download;
-    else if (isHttpUrl(data.url)) dl = data.url;
-    else if (isHttpUrl(data.video)) dl = data.video;
-    else dl = findFirstUrlDeep(data);
+    // Collect all URLs from response and prefer MP4
+    const allUrls = findAllUrlsDeep(data);
+    const mp4Urls = allUrls.filter(u => /\.mp4(\?|$)/i.test(u) || /mime=video/i.test(u) || /video/i.test(u));
+    const chosen = (mp4Urls[0] || allUrls[0]) || null;
 
-    if (!isHttpUrl(dl)) {
+    if (!isHttpUrl(chosen)) {
       user.credits += 1;
       return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
     }
 
     user.totalQueries++;
 
-    // Prefer smart send (video if small), else link
-    await sendVideoSmart(ctx, dl, '🎬 YouTube Video');
+    // User wants VIDEO type in chat.
+    try {
+      await ctx.replyWithVideo(chosen, { caption: '🎬 YouTube Video' });
+    } catch (sendErr) {
+      // If Telegram can't fetch or the file is too big, send links as plain text
+      await ctx.reply(`🎬 Video link:\n${chosen}`, {
+        disable_web_page_preview: true,
+      });
+    }
+
+    // If there are more options, send one-by-one as links
+    const options = mp4Urls.length ? mp4Urls : allUrls;
+    const extra = options.filter(u => u !== chosen).slice(0, 5);
+    for (const u of extra) {
+      await ctx.reply(`⬇️ Option link:\n${u}`, { disable_web_page_preview: true });
+    }
+
     return true;
   } catch (e) {
     console.error('yt error:', e?.message || e);
