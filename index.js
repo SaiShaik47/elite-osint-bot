@@ -358,6 +358,29 @@ function findFirstUrlDeep(obj) {
   return null;
 }
 
+function findAllUrlsDeep(obj, out = []) {
+  try {
+    if (!obj) return out;
+    if (typeof obj === 'string') {
+      if (/^https?:\/\//i.test(obj)) out.push(obj);
+      return out;
+    }
+    if (Array.isArray(obj)) {
+      for (const v of obj) findAllUrlsDeep(v, out);
+      return out;
+    }
+    if (typeof obj === 'object') {
+      for (const k of Object.keys(obj)) {
+        const v = obj[k];
+        // Prefer likely media keys but still scan everything
+        if (typeof v === 'string' && /^https?:\/\//i.test(v)) out.push(v);
+        else findAllUrlsDeep(v, out);
+      }
+    }
+  } catch (_) {}
+  return out;
+}
+
 // API Functions
 async function getIpInfo(ip) {
   try {
@@ -855,39 +878,14 @@ async function resolveShortUrl(url) {
 }
 
 function extractImageUrls(payload) {
-  // Best-effort: get all http(s) image links from likely keys
-  const urls = [];
-  const push = (u) => { if (typeof u === 'string' && /^https?:\/\//i.test(u)) urls.push(u); };
+  // Collect ALL urls then rank; this avoids "cropped/thumbnail" picks.
+  const all = findAllUrlsDeep(payload, []);
+  // Keep only http(s), de-dup
+  const uniq = [...new Set(all.filter(u => typeof u === 'string' && /^https?:\/\//i.test(u)))];
 
-  if (!payload) return urls;
-
-  if (Array.isArray(payload)) {
-    for (const v of payload) {
-      if (typeof v === 'string') push(v);
-      else if (v && typeof v === 'object') {
-        push(v.url); push(v.image); push(v.src);
-        const deep = findFirstUrlDeep(v);
-        if (deep) push(deep);
-      }
-    }
-  } else if (typeof payload === 'object') {
-    const candidates = [
-      payload.images, payload.image, payload.urls, payload.media, payload.data,
-      payload.result, payload.items
-    ];
-    for (const c of candidates) {
-      const more = extractImageUrls(c);
-      for (const u of more) push(u);
-    }
-    // last resort single deep url
-    const deep = findFirstUrlDeep(payload);
-    if (deep) push(deep);
-  } else if (typeof payload === 'string') {
-    push(payload);
-  }
-
-  // unique + keep order
-  return [...new Set(urls)];
+  // Prefer image-ish urls, but if none, return everything (some APIs omit extensions)
+  const imageish = uniq.filter(u => /\.(jpg|jpeg|png|webp|gif)(\?|$)/i.test(u) || /image/i.test(u));
+  return imageish.length ? imageish : uniq;
 }
 
 function rankHdUrl(u) {
@@ -1090,14 +1088,22 @@ async function handleTeraBox(ctx, url) {
       const channel = item.channel || '';
 
       const msg =
-        `📦 *TeraBox File ${i + 1}/${videos.length}*\n\n` +
-        `*Title:* \`${escapeMd(title)}\`\n` +
-        `*Size:* \`${escapeMd(size)}\`\n` +
-        (channel ? `*Channel:* \`${escapeMd(channel)}\`\n` : '') +
-        `\n*Download:*\n${item.download}`;
+        `📦 TeraBox File ${i + 1}/${videos.length}
+
+` +
+        `Title: ${title}
+` +
+        `Size: ${size}` +
+        (channel ? `
+Channel: ${channel}` : '') +
+        `
+
+Download:
+${item.download}`;
 
       if (i > 0) await sleep(1100);
-      await ctx.reply(msg, { parse_mode: 'Markdown' });
+      // No Markdown here (links often contain underscores/brackets and can break parsing)
+      await ctx.reply(msg, { disable_web_page_preview: true });
     }
 
     // Optional: show that we retried
