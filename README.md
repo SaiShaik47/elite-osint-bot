@@ -30,7 +30,7 @@ A premium Telegram bot with OSINT capabilities and admin panel.
 
 3. **Set Environment Variables** in Railway:
    ```
-   BOT_TOKEN=8469907392:AAGVUGR1SR9eNVVx-Hl7X1jJNaQewzb_VZ8
+   BOT_TOKEN=HERE
    ADMIN_ID=5695514027
    ```
 
