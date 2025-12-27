@@ -1934,7 +1934,8 @@ bot.callbackQuery("menu_admin", async (ctx) => {
 
 Tip: Use numeric user IDs for best results.`;
 
-  return try { await ctx.answerCallbackQuery(); } catch (_) {}
+  try { await ctx.answerCallbackQuery(); } catch (_) {}
+  // continue
   try { if (ctx.callbackQuery?.message) return await ctx.editMessageText(msg, { parse_mode: 'HTML', reply_markup: backToMenuKeyboard(), disable_web_page_preview: true }); } catch (_) {}
   return ctx.reply(msg, { parse_mode: 'HTML', reply_markup: backToMenuKeyboard(), disable_web_page_preview: true });
 });
