@@ -58,6 +58,54 @@ async function axiosGetWithRetry(url, opts = {}, attempts = 3) {
   throw lastErr || new Error('Request failed');
 }
 
+// ===============================
+// YTCONTENT PROCESS POLLER (REAL-TIME TEXT UPDATES)
+// ===============================
+// Poll a ytcontent "videoProcess" URL until it returns a real fileUrl (not "In Processing...")
+async function pollYtcontentProcess(processUrl, opts = {}) {
+  const intervalMs = opts.intervalMs ?? 2500;
+  const maxTries = opts.maxTries ?? 60; // ~2.5min
+  let last = null;
+
+  for (let i = 0; i < maxTries; i++) {
+    const res = await axiosGetWithRetry(processUrl, { timeout: 45000, responseType: 'json' }, 2);
+    const data = res.data || {};
+    last = data;
+
+    const fileUrl = data.fileUrl || data.url || data.download || data.download_url || null;
+
+    // fileUrl ready
+    if (typeof fileUrl === 'string' && /^https?:\/\//i.test(fileUrl) && !/in\s*processing/i.test(fileUrl)) {
+      return { ok: true, data, fileUrl };
+    }
+
+    await sleep(intervalMs);
+  }
+
+  return { ok: false, data: last, fileUrl: last?.fileUrl || null };
+}
+
+function formatYtProcessText(apiJson, processUrl) {
+  const p = apiJson?.percent ?? '…';
+  const size = apiJson?.estimatedFileSize ?? (apiJson?.fileSize ? ((Number(apiJson.fileSize) / (1024*1024)).toFixed(2) + ' MB') : 'Unknown');
+  const name = apiJson?.fileName ?? 'video.mp4';
+  const fileUrl = apiJson?.fileUrl ?? 'In Processing...';
+
+  return (
+`🎬 *YouTube 1080p Processing*
+
+• Progress: *${escapeMd(String(p))}*
+• Est. Size: *${escapeMd(String(size))}*
+• File: \`${escapeMd(String(name))}\`
+
+🔄 Process URL:
+${processUrl}
+
+⬇️ File URL:
+${fileUrl}`
+  );
+}
+
 
 // Load environment variables
 require('dotenv').config();
@@ -2556,11 +2604,17 @@ bot.command('yt', async (ctx) => {
 
     user.totalQueries++;
 
-    // ONLY response: buttons (no extra links, no video auto-send)
+    
+    // Show buttons as CALLBACKS (no browser open). We'll send links in chat text.
     const kb = new InlineKeyboard()
-      .url('1080p', isHttpUrl(u1080) ? u1080 : (isHttpUrl(u720) ? u720 : u480)).row()
-      .url('720p', isHttpUrl(u720) ? u720 : (isHttpUrl(u480) ? u480 : u1080)).row()
-      .url('480p', isHttpUrl(u480) ? u480 : (isHttpUrl(u720) ? u720 : u1080));
+      .text('1080p', `ytq_1080`).row()
+      .text('720p', `ytq_720`).row()
+      .text('480p', `ytq_480`);
+
+    // Cache resolved URLs per-chat/user
+    const key = `${ctx.chat.id}:${ctx.from.id}`;
+    if (!global.__ytCache) global.__ytCache = new Map();
+    global.__ytCache.set(key, { u1080, u720, u480, raw });
 
     return ctx.reply('🎬 Choose Quality:', { reply_markup: kb });
   } catch (e) {
@@ -2568,6 +2622,92 @@ bot.command('yt', async (ctx) => {
     user.credits += 1;
     return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.');
   }
+});
+
+// ===============================
+// YT QUALITY CALLBACK (REAL-TIME PROGRESS + FINAL FILE URL IN CHAT)
+// ===============================
+bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (_) {}
+
+  const q = ctx.match?.[1] || '1080';
+  const key = `${ctx.chat.id}:${ctx.from.id}`;
+  const cache = global.__ytCache && global.__ytCache.get(key);
+
+  if (!cache) {
+    try { return await ctx.reply('❌ Session expired. Please run /yt again.'); } catch (_) { return; }
+  }
+
+  const url =
+    q === '1080' ? cache.u1080 :
+    q === '720'  ? cache.u720  :
+    cache.u480;
+
+  if (!isHttpUrl(url)) {
+    return ctx.reply('❌ This quality is not available for this video.');
+  }
+
+  // ytcontent process link -> poll and edit message
+  if (/ytcontent\.net\/v3\/videoProcess\//i.test(url)) {
+    let last = {};
+    try {
+      const r = await axiosGetWithRetry(url, { timeout: 45000, responseType: 'json' }, 2);
+      last = r.data || {};
+    } catch (_) {
+      last = { percent: '0%' };
+    }
+
+    // show initial status
+    try { await ctx.editMessageText(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); }
+    catch (_) { try { await ctx.reply(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); } catch (_) {} }
+
+    const intervalMs = 2500;
+    const maxTries = 80; // ~3.3 min
+
+    for (let i = 0; i < maxTries; i++) {
+      const res = await axiosGetWithRetry(url, { timeout: 45000, responseType: 'json' }, 2);
+      last = res.data || last;
+
+      const fileUrl = last.fileUrl || last.url || last.download || last.download_url || null;
+      const ready = typeof fileUrl === 'string' && /^https?:\/\//i.test(fileUrl) && !/in\s*processing/i.test(fileUrl);
+
+      try { await ctx.editMessageText(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); } catch (_) {}
+
+      if (ready) {
+        await ctx.reply(
+          `✅ *${q}p Ready!*
+
+⬇️ File URL:
+${fileUrl}`,
+          { parse_mode: 'Markdown', disable_web_page_preview: true }
+        );
+        try { await sendVideoSmart(ctx, fileUrl, `🎬 YouTube ${q}p`); } catch (_) {}
+        return;
+      }
+
+      await sleep(intervalMs);
+    }
+
+    return ctx.reply(
+      `⏳ Still processing.
+
+Progress: ${last?.percent || '…'}
+File URL: ${last?.fileUrl || 'In Processing...'}
+
+Try again in a bit or press quality again.`,
+      { disable_web_page_preview: true }
+    );
+  }
+
+  // Direct URL
+  await ctx.reply(
+    `✅ *YouTube ${q}p*
+
+⬇️ Download URL:
+${url}`,
+    { parse_mode: 'Markdown', disable_web_page_preview: true }
+  );
+  try { await sendVideoSmart(ctx, url, `🎬 YouTube ${q}p`); } catch (_) {}
 });
 
 
