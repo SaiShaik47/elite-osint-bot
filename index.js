@@ -191,8 +191,7 @@ async function sendLogText(html) {
     try {
       await logApi.sendMessage(LOG_CHANNEL, chunk, {
         parse_mode: 'HTML',
-        disable_web_page_preview: true,
-      });
+        disable_web_page_preview: true });
     } catch (e) {
       // Don't crash the bot if logging fails (e.g. bot not admin / wrong channel)
       console.error('⚠️ Log channel send failed:', e?.description || e?.message || e);
@@ -228,8 +227,7 @@ bot.use(async (ctx, next) => {
     at: new Date().toISOString(),
     updateType: ctx.update?.callback_query ? 'callback_query' : (ctx.message ? 'message' : 'update'),
     text: ctx.message?.text,
-    data: ctx.update?.callback_query?.data,
-  };
+    data: ctx.update?.callback_query?.data };
 
   return als.run(store, async () => {
     try {
@@ -696,8 +694,7 @@ async function sendYouTubeThumb(ctx, ytUrl) {
     status: null,
     contentType: null,
     extractedImageUrl: null,
-    note: null,
-  };
+    note: null };
 
   // Robust: fetch ourselves, then upload buffer to Telegram.
   const res = await axios.get(thumbApi, {
@@ -1069,8 +1066,7 @@ async function sendImagesAsAlbum(ctx, urls, caption) {
     try {
       await ctx.replyWithDocument(u, {
         // keep captions short on docs to avoid parse issues
-        caption: i === 0 && !caption ? '📎 HD Image' : undefined,
-      });
+        caption: i === 0 && !caption ? '📎 HD Image' : undefined });
       await sleep(400);
     } catch (e) {
       // fallback: send link
@@ -1156,8 +1152,7 @@ async function sendVideoSmart(ctx, videoUrl, caption) {
     // If the upstream is giving a GIF (or a "GIF-like" mp4), send as DOCUMENT to prevent Telegram "GIF mode"
     if (looksLikeGif) {
       await ctx.replyWithDocument(videoUrl, {
-        caption: `${caption}\n\n⬇️ File (sent as document to avoid GIF mode)`,
-      });
+        caption: `${caption}\n\n⬇️ File (sent as document to avoid GIF mode)` });
       return true;
     }
 
@@ -1424,7 +1419,7 @@ function cleanupExpiredCodes() {
 // Helper function to send formatted messages
 async function sendFormattedMessage(ctx, text) {
   try {
-    await ctx.reply(text, { parse_mode: 'Markdown' });
+    await ctx.reply(text, {});
   } catch (error) {
     const plainText = text
       .replace(/\*\*(.*?)\*\*/g, '$1')
@@ -1472,7 +1467,7 @@ async function sendLongOrFile(ctx, text, filenamePrefix = 'output') {
 // Helper function for admin notifications
 async function notifyUser(userId, message) {
   try {
-    await bot.api.sendMessage(userId, message, { parse_mode: 'Markdown' });
+    await bot.api.sendMessage(userId, message, {});
   } catch (error) {
     console.error('Failed to notify user:', error);
   }
@@ -1481,8 +1476,7 @@ async function notifyUser(userId, message) {
 // Helper function for admin notifications
 async function notifyAdmin(message, keyboard) {
   try {
-    await bot.api.sendMessage(adminId, message, { 
-      parse_mode: 'Markdown',
+    await bot.api.sendMessage(adminId, message, {
       reply_markup: keyboard
     });
   } catch (error) {
@@ -1568,14 +1562,14 @@ bot.command('autoregister', async (ctx) => {
 
   const arg = (ctx.match || '').toString().trim().toLowerCase();
   if (!arg) {
-    return ctx.reply(`⚙️ Auto-register is currently: *${autoRegisterEnabled ? 'ON' : 'OFF'}*\\n\\nUsage: /autoregister on | off`, { parse_mode: 'Markdown' });
+    return ctx.reply(`⚙️ Auto-register is currently: *${autoRegisterEnabled ? 'ON' : 'OFF'}*\\n\\nUsage: /autoregister on | off`, {});
   }
 
   if (isTruthyOn(arg)) autoRegisterEnabled = true;
   else if (isTruthyOff(arg)) autoRegisterEnabled = false;
   else return ctx.reply('❌ Usage: /autoregister on | off');
 
-  return ctx.reply(`✅ Auto-register is now: *${autoRegisterEnabled ? 'ON' : 'OFF'}*`, { parse_mode: 'Markdown' });
+  return ctx.reply(`✅ Auto-register is now: *${autoRegisterEnabled ? 'ON' : 'OFF'}*`, {});
 });
 
 bot.command('approveall', async (ctx) => {
@@ -1731,7 +1725,7 @@ async function safeEditOrReply(ctx, text, keyboard) {
   // Try edit first (works for buttons)
   try {
     if (ctx.callbackQuery?.message) {
-      return await ctx.editMessageText(text, { parse_mode: "Markdown", reply_markup: keyboard });
+      return await ctx.editMessageText(text, { reply_markup: keyboard });
     }
   } catch (e) {
     // Common: "message is not modified" or can't edit. We'll fall back to reply.
@@ -1739,7 +1733,7 @@ async function safeEditOrReply(ctx, text, keyboard) {
 
   // Fallback: send a new message
   try {
-    return await ctx.reply(text, { parse_mode: "Markdown", reply_markup: keyboard });
+    return await ctx.reply(text, { reply_markup: keyboard });
   } catch (error) {
     // Last fallback: plain text
     const plainText = text
@@ -1781,7 +1775,7 @@ ${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
 
 Choose a category:`;
 
-  return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: mainMenuKeyboard(ctx.from.id) });
+  return ctx.reply(msg, { reply_markup: mainMenuKeyboard(ctx.from.id) });
 }
 bot.command('start', async (ctx) => {
   const user = getOrCreateUser(ctx);
@@ -1813,7 +1807,7 @@ To use the bot:
       .url("📢 Join Updates Channel", CHANNEL_URL).row()
       .text("✅ Verify Membership", `verify_${ctx.from.id}`);
 
-    return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: keyboard });
+    return ctx.reply(msg, { reply_markup: keyboard });
   }
 
   return sendApprovedWelcome(ctx, user);
@@ -2008,7 +2002,7 @@ Approve or Reject:`;
     for (const a of ADMINS) {
       if (!a) continue;
       try {
-        await bot.api.sendMessage(a, details, { parse_mode: 'Markdown', reply_markup: keyboard });
+        await bot.api.sendMessage(a, details, { reply_markup: keyboard });
       } catch (_) {}
     }
 
@@ -2731,8 +2725,7 @@ bot.command('spotify', async (ctx) => {
       await ctx.replyWithAudio(audioUrl, {
         caption,
         title: String(title).slice(0, 64),
-        performer: String(artist).slice(0, 64) || undefined,
-      });
+        performer: String(artist).slice(0, 64) || undefined });
     } catch (sendErr) {
       // Some hosts block Telegram from fetching the URL directly.
       // Fallback: download into memory and upload as an actual audio file.
@@ -2742,8 +2735,7 @@ bot.command('spotify', async (ctx) => {
           timeout: 60000,
           headers: { 'User-Agent': DEFAULT_UA },
           maxContentLength: 50 * 1024 * 1024,
-          maxBodyLength: 50 * 1024 * 1024,
-        });
+          maxBodyLength: 50 * 1024 * 1024 });
         const buf = Buffer.from(fileRes.data);
         const safeTitle = String(title || 'spotify').replace(/[^a-z0-9\-_. ]/gi, '').trim().slice(0, 40) || 'spotify';
         const filename = `${safeTitle}.mp3`;
@@ -2751,8 +2743,7 @@ bot.command('spotify', async (ctx) => {
         await ctx.replyWithAudio(new InputFile(buf, filename), {
           caption,
           title: String(title).slice(0, 64),
-          performer: String(artist).slice(0, 64) || undefined,
-        });
+          performer: String(artist).slice(0, 64) || undefined });
       } catch (dlErr) {
         // Last resort: send as document link
         await ctx.replyWithDocument(audioUrl, { caption: `${caption}\n\n(Direct audio failed, download this file.)` });
@@ -2789,13 +2780,13 @@ bot.command('yt', async (ctx) => {
   function extractYouTubeId(u) {
     try {
       const s = String(u || '');
-      const m1 = s.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
+      const m1 = s.match(/[?&]v=([a-zA-Z0-9_-]{6 })/);
       if (m1) return m1[1];
-      const m2 = s.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
+      const m2 = s.match(/youtu\.be\/([a-zA-Z0-9_-]{6 })/);
       if (m2) return m2[1];
-      const m3 = s.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
+      const m3 = s.match(/\/shorts\/([a-zA-Z0-9_-]{6 })/);
       if (m3) return m3[1];
-      const m4 = s.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+      const m4 = s.match(/\/embed\/([a-zA-Z0-9_-]{6 })/);
       if (m4) return m4[1];
     } catch (_) {}
     return null;
@@ -2909,7 +2900,7 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
 
     // show initial status
     try { await ctx.editMessageText(formatYtProcessText(last, url), { disable_web_page_preview: true }); }
-    catch (_) { try { await ctx.reply(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); } catch (_) {} }
+    catch (_) { try { await ctx.reply(formatYtProcessText(last, url), {}); } catch (_) {} }
 
     const intervalMs = 2500;
     const maxTries = 80; // ~3.3 min
@@ -2921,7 +2912,7 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
       const fileUrl = last.fileUrl || last.url || last.download || last.download_url || null;
       const ready = typeof fileUrl === 'string' && /^https?:\/\//i.test(fileUrl) && !/in\s*processing/i.test(fileUrl);
 
-      try { await ctx.editMessageText(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); } catch (_) {}
+      try { await ctx.editMessageText(formatYtProcessText(last, url), {}); } catch (_) {}
 
       if (ready) {
         await ctx.reply(
@@ -2929,7 +2920,7 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
 
 ⬇️ File URL:
 ${fileUrl}`,
-          { parse_mode: 'Markdown', disable_web_page_preview: true }
+          { disable_web_page_preview: true }
         );
         try { await sendVideoSmart(ctx, fileUrl, `🎬 YouTube ${q}p`); } catch (_) {}
         return;
@@ -2955,7 +2946,7 @@ Try again in a bit or press quality again.`,
 
 ⬇️ Download URL:
 ${url}`,
-    { parse_mode: 'Markdown', disable_web_page_preview: true }
+    { disable_web_page_preview: true }
   );
   try { await sendVideoSmart(ctx, url, `🎬 YouTube ${q}p`); } catch (_) {}
 });
@@ -3709,8 +3700,7 @@ function tempmailInlineKeyboard() {
     inline_keyboard: [
       [{ text: '🔄 Refresh inbox', callback_data: 'tm_refresh' }],
       [{ text: '📨 My tempmail', callback_data: 'tm_me' }],
-    ],
-  };
+    ] };
 }
 // Uses https://docs.mail.tm/ API
 // ===============================
@@ -3840,7 +3830,7 @@ bot.command('tempmail', async (ctx) => {
       const s = await ensureSession(ctx);
       const msg = `📨 *Your Current TempMail*\n\n\`${s.address}\`\n\nUse: /tempmail inbox`;
       try {
-        return await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: tempmailInlineKeyboard() });
+        return await ctx.reply(msg, { reply_markup: tempmailInlineKeyboard() });
       } catch (_) {
         return sendFormattedMessage(ctx, msg);
       }
@@ -3853,7 +3843,7 @@ bot.command('tempmail', async (ctx) => {
       if (!items.length) {
         const msg = `📭 *Inbox is empty*\n\nEmail: \`${s.address}\`\n\nTip: wait 10–30 seconds, then tap *Refresh inbox* or run /tempmail inbox again.`;
         try {
-          return await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: tempmailInlineKeyboard() });
+          return await ctx.reply(msg, { reply_markup: tempmailInlineKeyboard() });
         } catch (_) {
           return sendFormattedMessage(ctx, msg);
         }
@@ -3869,7 +3859,7 @@ bot.command('tempmail', async (ctx) => {
 
       const msg = `📥 *Inbox (showing up to 15)*\nEmail: \`${s.address}\`\n\n${lines}\n\nUse: /tempmail read <id>`;
       try {
-        return await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: tempmailInlineKeyboard() });
+        return await ctx.reply(msg, { reply_markup: tempmailInlineKeyboard() });
       } catch (_) {
         return sendFormattedMessage(ctx, msg);
       }
