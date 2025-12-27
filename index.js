@@ -2178,8 +2178,15 @@ bot.command('ai', async (ctx) => {
 
     user.totalQueries++;
 
-    // Reply only the text (no JSON)
-    return ctx.reply(String(answer));
+	    // Reply ONLY the text (no JSON) and avoid Markdown parsing issues.
+	    // Some APIs return Markdown-escaped characters (e.g. \\* or \\_). We lightly unescape them.
+	    const plain = String(answer)
+	      .replace(/\\\\([_*\[\](){}#+\-.!|>~`=])/g, '$1')
+	      .trim();
+
+	    return ctx.api.sendMessage(ctx.chat.id, plain, {
+	      disable_web_page_preview: true,
+	    });
   } catch (e) {
     console.error('ai error:', e?.message || e);
     user.credits += 1;
