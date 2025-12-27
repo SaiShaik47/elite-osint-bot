@@ -140,6 +140,57 @@ if (!botToken) {
 // Initialize bot
 const bot = new Bot(botToken);
 
+
+
+// ===============================
+// AUTO VERSION FOOTER (wrap senders)
+// ===============================
+bot.use(async (ctx, next) => {
+  try {
+    // Wrap ctx.reply
+    if (typeof ctx.reply === 'function') {
+      const _origReply = ctx.reply.bind(ctx);
+      ctx.reply = (text, other) => _origReply(_appendVersionFooter(text), other);
+    }
+
+    // Wrap common reply variants
+    if (typeof ctx.replyWithHTML === 'function') {
+      const _orig = ctx.replyWithHTML.bind(ctx);
+      ctx.replyWithHTML = (text, other) => _orig(_appendVersionFooter(text), other);
+    }
+    if (typeof ctx.replyWithMarkdown === 'function') {
+      const _orig = ctx.replyWithMarkdown.bind(ctx);
+      ctx.replyWithMarkdown = (text, other) => _orig(_appendVersionFooter(text), other);
+    }
+    if (typeof ctx.replyWithMarkdownV2 === 'function') {
+      const _orig = ctx.replyWithMarkdownV2.bind(ctx);
+      ctx.replyWithMarkdownV2 = (text, other) => _orig(_appendVersionFooter(text), other);
+    }
+
+    // Wrap API sendMessage for background jobs / plain objects
+    if (ctx.api && typeof ctx.api.sendMessage === 'function') {
+      const _origSendMessage = ctx.api.sendMessage.bind(ctx.api);
+      ctx.api.sendMessage = (chatId, text, other = {}) => _origSendMessage(chatId, _appendVersionFooter(text), other);
+    }
+
+    // Wrap API media senders to append footer into caption (when present)
+    const wrapCaption = (fnName) => {
+      if (ctx.api && typeof ctx.api[fnName] === 'function') {
+        const _orig = ctx.api[fnName].bind(ctx.api);
+        ctx.api[fnName] = (chatId, media, other = {}) => {
+          if (other && typeof other.caption === 'string') other.caption = _appendVersionFooter(other.caption);
+          return _orig(chatId, media, other);
+        };
+      }
+    };
+    wrapCaption('sendPhoto');
+    wrapCaption('sendVideo');
+    wrapCaption('sendDocument');
+    wrapCaption('sendAnimation');
+    wrapCaption('sendAudio');
+  } catch (_) {}
+  return next();
+});
 // ===============================
 // YouTube Jobs (for non-blocking progress + stop button)
 // ===============================
@@ -630,6 +681,43 @@ process.once('SIGINT', () => { try { saveStateToDisk(); } catch (_) {} });
 const usedUpCodes = new Set();
 const redeemStats = { generated: 0, redeemed: 0 };  // normalized codes that hit maxUses
 const adminId = process.env.ADMIN_USER_ID;
+// ===============================
+// VERSION (persisted in /data)
+// ===============================
+const BOTMETA_DATA_DIR = process.env.DATA_DIR || '/data';
+const META_FILE = require('path').join(BOTMETA_DATA_DIR, 'bot_meta.json');
+let BOT_VERSION = 'v9';
+
+function _loadBotMeta() {
+  try {
+    if (require('fs').existsSync(META_FILE)) {
+      const meta = JSON.parse(require('fs').readFileSync(META_FILE, 'utf8'));
+      if (meta && typeof meta.version === 'string' && meta.version.trim()) {
+        BOT_VERSION = meta.version.trim();
+      }
+    }
+  } catch (e) {
+    console.error('[META] Failed to load bot meta:', e.message);
+  }
+}
+
+function _saveBotMeta() {
+  try {
+    require('fs').mkdirSync(BOTMETA_DATA_DIR, { recursive: true });
+    require('fs').writeFileSync(META_FILE, JSON.stringify({ version: BOT_VERSION }, null, 2), 'utf8');
+  } catch (e) {
+    console.error('[META] Failed to save bot meta:', e.message);
+  }
+}
+
+_loadBotMeta();
+
+function _appendVersionFooter(text) {
+  if (typeof text !== 'string' || !text) return text;
+  if (text.includes('🧩 Version:')) return text;
+  return `${text}\n━━━━━━━━━━━━\n🧩 Version: ${BOT_VERSION}`;
+}
+
 
 // Maintenance mode flag (stored in memory, will reset on bot restart)
 let maintenanceMode = false;
@@ -2208,6 +2296,22 @@ Choose a category:`;
 
   return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: mainMenuKeyboard(ctx.from.id) });
 }
+
+// Admin-only setversion command
+bot.command('setversion', async (ctx) => {
+  const caller = String(ctx.from?.id || '');
+  if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
+
+  const v = String(getCommandArgs(ctx) || '').trim();
+  if (!v) return ctx.reply('Usage: /setversion v10');
+
+  const oldV = BOT_VERSION;
+  BOT_VERSION = v;
+  _saveBotMeta();
+
+  return ctx.reply(`✅ Version updated\nOld: ${oldV}\nNew: ${BOT_VERSION}`);
+});
+
 bot.command('start', async (ctx) => {
   const user = getOrCreateUser(ctx);
 
@@ -7175,6 +7279,8 @@ process.on('SIGTERM', () => {
 // START BOT
 // ===============================
 console.log('🚀 Starting Premium OSINT Bot with Complete Admin Panel & Registration Management...');
+
+console.log(`🧩 Version: ${BOT_VERSION}`);
 console.log(`🤖 Bot Username: @OsintShit_Bot`);
 console.log(`👑 Admin ID: ${adminId}`);
 console.log('📡 Starting polling...');
