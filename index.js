@@ -2303,39 +2303,104 @@ bot.command('yt', async (ctx) => {
     return sendFormattedMessage(ctx, '🎬 Usage: /yt <youtube url>');
   }
 
-  await sendFormattedMessage(ctx, '🎬 Fetching YouTube download...');
+  await sendFormattedMessage(ctx, '🎬 Fetching YouTube video...');
+
+  const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(url)}`;
+
+  // A helper to pull possible format objects from various API shapes.
+  const getFormats = (data) => {
+    const out = [];
+    if (!data || typeof data !== 'object') return out;
+
+    const pushArr = (arr) => {
+      if (Array.isArray(arr)) arr.forEach(x => x && typeof x === 'object' && out.push(x));
+    };
+
+    pushArr(data.formats);
+    pushArr(data.format);
+    pushArr(data.links);
+    pushArr(data.downloads);
+    if (data.result && typeof data.result === 'object') {
+      pushArr(data.result.formats);
+      pushArr(data.result.links);
+      pushArr(data.result.downloads);
+    }
+    return out;
+  };
+
+  const scoreFormat = (f) => {
+    const u = String(f.url || f.link || f.download || f.download_url || f.dl || '').toLowerCase();
+    const ext = String(f.ext || f.container || f.format || f.mime || f.mimeType || '').toLowerCase();
+    const note = String(f.note || f.type || f.quality || f.qualityLabel || f.name || '').toLowerCase();
+    const hasAudio = f.hasAudio === true || note.includes('audio') || note.includes('mux') || note.includes('progressive');
+    const videoOnly = note.includes('video only') || note.includes('video-only') || f.hasAudio === false;
+
+    let s = 0;
+    if (u.includes('.mp4') || ext.includes('mp4')) s += 60;
+    if (ext.includes('webm')) s -= 10;
+    if (hasAudio) s += 50;
+    if (videoOnly) s -= 80;
+    if (note.includes('mux') || note.includes('progressive')) s += 20;
+    if (note.includes('1080')) s += 18;
+    if (note.includes('720')) s += 12;
+    if (note.includes('480')) s += 6;
+
+    const q = parseInt(String(f.height || f.quality || f.itag || '').replace(/[^\d]/g, ''), 10);
+    if (!Number.isNaN(q)) s += Math.min(20, Math.floor(q / 60));
+
+    // Prefer direct CDN-ish links over "watch"/redirect pages.
+    if (u.includes('youtube.com/watch') || u.includes('youtu.be/')) s -= 40;
+
+    return s;
+  };
 
   try {
-    const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(url)}`;
-    const res = await axiosGetWithRetry(api, { timeout: 45000 }, 2);
-    const data = res.data || {};
+    const res = await fetchWithRetry(api, { method: 'GET' }, 3);
+    const data = await res.json();
 
-    // Collect all URLs from response and prefer MP4
-    const allUrls = findAllUrlsDeep(data);
-    const mp4Urls = allUrls.filter(u => /\.mp4(\?|$)/i.test(u) || /mime=video/i.test(u) || /video/i.test(u));
-    const chosen = (mp4Urls[0] || allUrls[0]) || null;
+    const formats = getFormats(data);
 
-    if (!isHttpUrl(chosen)) {
+    // Collect candidate URLs from formats first
+    const candidates = formats
+      .map(f => ({
+        url: f.url || f.link || f.download || f.download_url || f.dl,
+        score: scoreFormat(f),
+      }))
+      .filter(x => x.url && typeof x.url === 'string');
+
+    // Fallback common single-url keys
+    const fallbackUrl =
+      data?.download || data?.video || data?.url ||
+      data?.result?.download || data?.result?.video || data?.result?.url ||
+      null;
+
+    if (fallbackUrl && typeof fallbackUrl === 'string') {
+      candidates.push({ url: fallbackUrl, score: 5 });
+    }
+
+    if (!candidates.length) {
       user.credits += 1;
-      return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
+      return sendFormattedMessage(ctx, '❌ No downloadable video found.\n💳 1 credit refunded');
     }
 
-    user.totalQueries++;
+    // Choose best (prefer muxed/progressive MP4 with audio)
+    candidates.sort((a, b) => b.score - a.score);
+    const chosen = candidates[0].url;
 
-    // User wants VIDEO type in chat.
+    // Try to send as VIDEO (best UX: plays with audio if muxed)
     try {
-      await ctx.replyWithVideo(chosen, { caption: '🎬 YouTube Video' });
-    } catch (sendErr) {
-      // If Telegram can't fetch or the file is too big, send links as plain text
-      await ctx.reply(`🎬 Video link:\n${chosen}`, {
-        disable_web_page_preview: true,
+      await ctx.replyWithVideo(chosen, {
+        supports_streaming: true,
+        caption: '🎬 YouTube Video',
       });
+    } catch (sendErr) {
+      // If Telegram cannot fetch/stream it, still provide link (no preview)
+      await ctx.reply(`⬇️ Video link:\n${chosen}`, { disable_web_page_preview: true });
     }
 
-    // If there are more options, send one-by-one as links
-    const options = mp4Urls.length ? mp4Urls : allUrls;
-    const extra = options.filter(u => u !== chosen).slice(0, 5);
-    for (const u of extra) {
+    // Send more options one-by-one (no preview)
+    const more = [...new Set(candidates.map(x => x.url))].filter(u => u !== chosen).slice(0, 6);
+    for (const u of more) {
       await ctx.reply(`⬇️ Option link:\n${u}`, { disable_web_page_preview: true });
     }
 
@@ -2343,7 +2408,7 @@ bot.command('yt', async (ctx) => {
   } catch (e) {
     console.error('yt error:', e?.message || e);
     user.credits += 1;
-    return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.');
+    return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.\n💳 1 credit refunded');
   }
 });
 
