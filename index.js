@@ -1691,8 +1691,7 @@ if (!args) {
     return ctx.reply('❌ Could not resolve that user.\n✅ Try replying to the user’s message and sending /unban, or use numeric ID / @username.');
   }
 }
-  const targetId = await resolveUserId(args.split(/\\s+/)[0]);
-  if (!targetId) return ctx.reply('❌ Could not resolve that user. Use numeric ID or @username.');
+
 
   const existed = bannedUsers.delete(String(targetId));
 
