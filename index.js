@@ -87,25 +87,44 @@ async function pollYtcontentProcess(processUrl, opts = {}) {
 
 // HTML (no markdown symbols). Telegram shows real bold with <b>...</b>
 // HTML (no markdown symbols). Telegram shows real bold with <b>...</b>
-function formatYtProcessHtml(apiJson, processUrl) {
-  const percent = apiJson?.percent ?? '…';
-  const size = apiJson?.estimatedFileSize ?? (apiJson?.fileSize ? ((Number(apiJson.fileSize) / (1024*1024)).toFixed(2) + ' MB') : 'Unknown');
-  const name = apiJson?.fileName ?? 'video.mp4';
-  const fileUrl = apiJson?.fileUrl ?? 'In Processing...';
+function formatYtProcessHtml(apiJson, processUrl, meta = {}) {
+  const percentRaw = apiJson?.percent ?? apiJson?.progress ?? '…';
+  const percentNum = (() => {
+    const m = String(percentRaw).match(/(\d+(\.\d+)?)/);
+    return m ? parseFloat(m[1]) : null;
+  })();
+
+  const bytes =
+    (typeof apiJson?.fileSizeBytes === 'number' && apiJson.fileSizeBytes) ||
+    (typeof apiJson?.fileSize === 'number' && apiJson.fileSize) ||
+    (typeof apiJson?.estimatedFileSizeBytes === 'number' && apiJson.estimatedFileSizeBytes) ||
+    null;
+
+  const size =
+    apiJson?.estimatedFileSize ||
+    (bytes ? (bytes / (1024 * 1024)).toFixed(2) + ' MB' : (apiJson?.fileSize ? String(apiJson.fileSize) : 'Unknown'));
+
+  const name = apiJson?.fileName ?? apiJson?.name ?? 'video.mp4';
+  const fileUrl = apiJson?.fileUrl ?? apiJson?.url ?? 'In Processing...';
+
+  const speedText = meta?.speedText ? String(meta.speedText) : '';
+  const etaText = meta?.etaText ? String(meta.etaText) : '';
+
+  const extra =
+    (speedText || etaText)
+      ? `\n<b>Speed:</b> <code>${escapeHtml(speedText || '…')}</code>\n<b>ETA:</b> <code>${escapeHtml(etaText || '…')}</code>\n`
+      : '\n';
 
   return (
 `🎬 <b>YouTube Processing</b>\n\n` +
-`<b>Progress:</b> ${escapeHtml(String(percent))}\n` +
-`<b>Est. Size:</b> ${escapeHtml(String(size))}\n` +
-`<b>File:</b> <code>${escapeHtml(String(name))}</code>\n\n` +
+`<b>Progress:</b> <code>${escapeHtml(String(percentRaw))}</code>\n` +
+`<b>Est. Size:</b> <code>${escapeHtml(String(size))}</code>\n` +
+`<b>File:</b> <code>${escapeHtml(String(name))}</code>` +
+extra +
 `<b>Status:</b> <code>${escapeHtml(String(fileUrl))}</code>\n` +
 `<b>Process:</b> <code>${escapeHtml(String(processUrl))}</code>`
   );
 }
-
-
-// Load environment variables
-require('dotenv').config();
 
 // Initialize bot with proper error handling
 const botToken = process.env.BOT_TOKEN;
@@ -152,6 +171,60 @@ const als = new AsyncLocalStorage();
 
 const LOG_CHANNEL = process.env.LOG_CHANNEL || '@OsintLogsUpdates'; // can be @channelusername or numeric channel id
 const logApi = new Api(botToken); // separate API (no transformers) to avoid recursion
+
+// Optional separate admin-audit channel (falls back to LOG_CHANNEL)
+const ADMIN_AUDIT_CHANNEL = process.env.ADMIN_AUDIT_CHANNEL || process.env.ADMIN_LOG_CHANNEL || LOG_CHANNEL;
+
+// Send a compact admin audit entry (best-effort)
+async function adminAudit(action, ctx, details = '') {
+  try {
+    if (!ADMIN_AUDIT_CHANNEL) return;
+    const user = ctx?.from || {};
+    const chat = ctx?.chat || {};
+    const uname = user.username ? `@${user.username}` : (user.first_name || 'user');
+    const uid = user.id ? String(user.id) : 'unknown';
+    const cid = chat.id ? String(chat.id) : 'unknown';
+    const when = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+    const msg =
+      `🛡️ <b>ADMIN AUDIT</b>\n` +
+      `<b>Action:</b> <code>${escapeHtml(String(action))}</code>\n` +
+      `<b>By:</b> ${escapeHtml(uname)} (<code>${escapeHtml(uid)}</code>)\n` +
+      `<b>Chat:</b> <code>${escapeHtml(cid)}</code>\n` +
+      `<b>When:</b> <code>${escapeHtml(when)}</code>\n` +
+      (details ? `\n<b>Details:</b>\n${escapeHtml(String(details)).slice(0, 3500)}` : '');
+
+    await logApi.sendMessage(ADMIN_AUDIT_CHANNEL, msg, { parse_mode: 'HTML', disable_web_page_preview: true });
+  } catch (_) {}
+}
+
+// Per-command credit tracking helpers
+function getCommandNameFromText(t = '') {
+  const s = String(t || '').trim();
+  if (!s.startsWith('/')) return null;
+  const first = s.split(/\s+/)[0];
+  // strip bot username if present: /cmd@MyBot
+  return first.replace(/^\//, '').replace(/@.+$/, '').toLowerCase();
+}
+function ensureCommandStats(user) {
+  if (!user) return;
+  if (!user.commandStats || typeof user.commandStats !== 'object') user.commandStats = {};
+}
+function recordCommandUse(user, cmd) {
+  if (!user || !cmd) return;
+  ensureCommandStats(user);
+  user._lastCommand = cmd;
+  if (!user.commandStats[cmd]) user.commandStats[cmd] = { uses: 0, creditsSpent: 0, creditsRefunded: 0 };
+  user.commandStats[cmd].uses += 1;
+}
+function refundCredits(user, amount = 1, cmd = null) {
+  if (!user) return;
+  user.credits += amount;
+  const c = cmd || user._lastCommand || 'unknown';
+  ensureCommandStats(user);
+  if (!user.commandStats[c]) user.commandStats[c] = { uses: 0, creditsSpent: 0, creditsRefunded: 0 };
+  user.commandStats[c].creditsRefunded += amount;
+}
 
 function escapeHtml(s = '') {
   return String(s)
@@ -306,7 +379,10 @@ const CHANNEL_ID = -1003133803574; // Osint Updates (CONFIRMED)
 const CHANNEL_URL = 'https://t.me/OsintShitUpdates';
 
 // Admin Telegram IDs
-const ADMINS = [process.env.ADMIN_USER_ID];
+const ADMINS = String(process.env.ADMINS || process.env.ADMIN_USER_ID || '')
+  .split(',')
+  .map(s => String(s || '').trim())
+  .filter(Boolean);
 
 // ===============================
 // MEMORY STORAGE (NO DB)
@@ -347,18 +423,19 @@ console.log('✅ Environment variables loaded successfully');
 console.log(`🤖 Bot Token: ${botToken.substring(0, 10)}...`);
 console.log(`👑 Admin ID: ${adminId}`);
 
-// Initialize admin user
-users.set(adminId, {
-  telegramId: adminId,
-  username: 'fuck_sake',
-  firstName: 'Admin',
-  isAdmin: true,
-  isApproved: true,
-  credits: 999999,
-  isPremium: true,
-  totalQueries: 0,
-  registrationDate: new Date()
-});
+// Initialize admin user(s)
+for (const aid of Array.from(new Set([String(adminId || ''), ...(ADMINS || [])].map(x => String(x || '').trim()).filter(Boolean)))) {
+  users.set(String(aid), {
+    telegramId: String(aid),
+    username: 'admin',
+    isAdmin: true,
+    isApproved: true,
+    credits: 10,
+      commandStats: {},
+      totalQueries: 0,
+    registrationDate: new Date()
+  });
+}
 
 // ===============================
 // BULLETPROOF JOIN CHECK
@@ -1333,6 +1410,13 @@ function deductCredits(user, amount = 1) {
   
   if (user.credits >= amount) {
     user.credits -= amount;
+    // Track per-command spend
+    try {
+      const cmd = user._lastCommand || 'unknown';
+      ensureCommandStats(user);
+      if (!user.commandStats[cmd]) user.commandStats[cmd] = { uses: 0, creditsSpent: 0, creditsRefunded: 0 };
+      user.commandStats[cmd].creditsSpent += amount;
+    } catch (_) {}
     return true;
   }
   
@@ -1364,13 +1448,27 @@ function getOrCreateUser(ctx) {
     });
   }
 
-  return users.get(telegramId);
+  
+  // Track last command usage for per-command credit stats
+  try {
+    const cmd = getCommandNameFromText(ctx?.message?.text || ctx?.msg?.text || '');
+    if (cmd) {
+      const u = users.get(telegramId);
+      recordCommandUse(u, cmd);
+    }
+  } catch (_) {}
+
+return users.get(telegramId);
 }
 
 // Helper function to check if user is admin
 function isAdmin(userId) {
-  const user = users.get(userId);
-  return user && (user.isAdmin || userId === adminId);
+  const id = String(userId || '');
+  if (!id) return false;
+  if (String(adminId) === id) return true;
+  if (Array.isArray(ADMINS) && ADMINS.map(String).includes(id)) return true;
+  const user = users.get(id);
+  return !!(user && user.isAdmin);
 }
 
 // ===============================
@@ -1506,7 +1604,7 @@ bot.command('ban', async (ctx) => {
   const caller = String(ctx.from?.id || '');
   if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
 
-  const args = (ctx.match || '').toString().trim();
+  const args = String(getCommandArgs(ctx) || '').trim();
   if (!args) return ctx.reply('❌ Usage: /ban <userId|@username> [reason]');
 
   const [targetRaw, ...reasonParts] = args.split(/\\s+/);
@@ -1518,6 +1616,8 @@ bot.command('ban', async (ctx) => {
   const reason = reasonParts.join(' ').trim();
   const at = new Date().toISOString();
   bannedUsers.set(String(targetId), { by: caller, at, reason });
+
+  await adminAudit('ban', ctx, `target=${targetId}${reason ? ` | reason=${reason}` : ''}`);
 
   // notify target (best-effort)
   try {
@@ -1531,13 +1631,15 @@ bot.command('unban', async (ctx) => {
   const caller = String(ctx.from?.id || '');
   if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
 
-  const args = (ctx.match || '').toString().trim();
+  const args = String(getCommandArgs(ctx) || '').trim();
   if (!args) return ctx.reply('❌ Usage: /unban <userId|@username>');
 
   const targetId = await resolveUserId(args.split(/\\s+/)[0]);
   if (!targetId) return ctx.reply('❌ Could not resolve that user. Use numeric ID or @username.');
 
   const existed = bannedUsers.delete(String(targetId));
+
+  await adminAudit('unban', ctx, `target=${targetId}`);
   if (!existed) return ctx.reply('ℹ️ That user was not banned.');
 
   // notify target (best-effort)
@@ -2260,11 +2362,11 @@ bot.command('dl', async (ctx) => {
     if (success) {
       user.totalQueries++;
     } else {
-      user.credits += 1; // Refund credit on failure
+      refundCredits(user, 1); // Refund credit on failure
     }
   } catch (error) {
     console.error('Error in dl command:', error);
-    user.credits += 1; // Refund credit on error
+    refundCredits(user, 1); // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
@@ -2292,11 +2394,11 @@ bot.command('snap', async (ctx) => {
     if (success) {
       user.totalQueries++;
     } else {
-      user.credits += 1; // Refund credit on failure
+      refundCredits(user, 1); // Refund credit on failure
     }
   } catch (error) {
     console.error('Error in snap command:', error);
-    user.credits += 1; // Refund credit on error
+    refundCredits(user, 1); // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
@@ -2323,11 +2425,11 @@ bot.command('insta', async (ctx) => {
     if (success) {
       user.totalQueries++;
     } else {
-      user.credits += 1; // Refund credit on failure
+      refundCredits(user, 1); // Refund credit on failure
     }
   } catch (error) {
     console.error('Error in insta command:', error);
-    user.credits += 1; // Refund credit on error
+    refundCredits(user, 1); // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
@@ -2354,11 +2456,11 @@ bot.command('pin', async (ctx) => {
     if (success) {
       user.totalQueries++;
     } else {
-      user.credits += 1; // Refund credit on failure
+      refundCredits(user, 1); // Refund credit on failure
     }
   } catch (error) {
     console.error('Error in pin command:', error);
-    user.credits += 1; // Refund credit on error
+    refundCredits(user, 1); // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
@@ -2385,11 +2487,11 @@ bot.command('fb', async (ctx) => {
     if (success) {
       user.totalQueries++;
     } else {
-      user.credits += 1; // Refund credit on failure
+      refundCredits(user, 1); // Refund credit on failure
     }
   } catch (error) {
     console.error('Error in fb command:', error);
-    user.credits += 1; // Refund credit on error
+    refundCredits(user, 1); // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });
@@ -2416,11 +2518,11 @@ bot.command('terabox', async (ctx) => {
     if (success) {
       user.totalQueries++;
     } else {
-      user.credits += 1; // Refund credit on failure
+      refundCredits(user, 1); // Refund credit on failure
     }
   } catch (error) {
     console.error('Error in terabox command:', error);
-    user.credits += 1; // Refund credit on error
+    refundCredits(user, 1); // Refund credit on error
     sendFormattedMessage(ctx, '❌ An error occurred while processing your request.');
   }
 });// ===============================
@@ -2439,7 +2541,7 @@ async function guardedImageDownloader(ctx, kind, prettyName) {
 
   const url = (ctx.match || '').trim();
   if (!url) {
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, `❌ Usage: /${kind}dl <url>\nExample: /${kind}dl https://...\n💳 1 credit refunded`);
   }
 
@@ -2449,7 +2551,7 @@ async function guardedImageDownloader(ctx, kind, prettyName) {
     const r = await tobiDownloadImages(kind === 'tw' ? 'twitter' : (kind === 'pin' ? 'pinterest' : 'instagram'), url);
 
     if (!r.urls || !r.urls.length) {
-      user.credits += 1;
+      refundCredits(user, 1);
       return sendFormattedMessage(ctx, `❌ No images found.\n💳 1 credit refunded`);
     }
 
@@ -2466,7 +2568,7 @@ async function guardedImageDownloader(ctx, kind, prettyName) {
     return true;
   } catch (e) {
     console.error(`${prettyName} downloader error:`, e?.message || e);
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, `❌ Failed to fetch ${prettyName} media.\n💳 1 credit refunded`);
   }
 }
@@ -2486,7 +2588,7 @@ bot.command('ai', async (ctx) => {
 
   const prompt = getCommandArgs(ctx);
   if (!prompt) {
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, '🤖 Usage: /ai <your text>');
   }
 
@@ -2509,7 +2611,7 @@ bot.command('ai', async (ctx) => {
       '';
 
     if (!String(answer).trim()) {
-      user.credits += 1;
+      refundCredits(user, 1);
       return sendFormattedMessage(ctx, '❌ AI returned empty response. Try again.');
     }
 
@@ -2519,8 +2621,181 @@ bot.command('ai', async (ctx) => {
     return ctx.reply(String(answer));
   } catch (e) {
     console.error('ai error:', e?.message || e);
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, '❌ AI request failed. Try again.');
+  }
+});
+
+
+
+// ===============================
+// IMAGE GEN (PROMPT -> DIRECT IMAGE)
+// API: https://tobi-paras-aotpy-api-gen.vercel.app/?prompt=...&download=true
+// ===============================
+
+// In-memory cache for image-gen options (per chat+user)
+global.__imgCache = global.__imgCache || new Map();
+
+function buildImgKeyboard(state, apiUrl) {
+  const improveOn = !!state?.improve;
+  const wideOn = String(state?.format || '').toLowerCase() === 'wide';
+
+  const kb = new InlineKeyboard()
+    .text(`Improve ${improveOn ? '✅' : '▫️'}`, 'imgopt_improve')
+    .text(`Wide ${wideOn ? '✅' : '▫️'}`, 'imgopt_wide')
+    .row()
+    .text('Random 🎲', 'imgopt_random')
+    .url('Download 🔗', apiUrl);
+
+  return kb;
+}
+
+async function generateAndSendImage(ctx, user, state, { replaceMessageId = null } = {}) {
+  const prompt = String(state?.prompt || '').trim();
+  if (!prompt) throw new Error('Missing prompt');
+
+  const qs = new URLSearchParams();
+  qs.set('prompt', prompt);
+  qs.set('download', 'true');
+  if (state?.improve) qs.set('improve', 'true');
+  if (state?.format) qs.set('format', state.format);
+  if (state?.random) qs.set('random', state.random);
+
+  const apiUrl = `https://tobi-paras-aotpy-api-gen.vercel.app/?${qs.toString()}`;
+
+  const res = await axiosGetWithRetry(apiUrl, { timeout: 60000, responseType: 'arraybuffer' }, 2);
+  const buf = Buffer.from(res.data);
+  const contentType = String(res.headers?.['content-type'] || '').toLowerCase();
+
+  const ext =
+    contentType.includes('png') ? 'png' :
+    contentType.includes('webp') ? 'webp' :
+    contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg' :
+    'png';
+
+  const fileName = `image_${Date.now()}.${ext}`;
+  const caption =
+    `✅ <b>Image generated</b>\n` +
+    `<b>Prompt:</b> <code>${escapeHtml(prompt).slice(0, 250)}</code>\n` +
+    `<b>Improve:</b> <code>${state?.improve ? 'true' : 'false'}</code>\n` +
+    `<b>Format:</b> <code>${escapeHtml(String(state?.format || 'default'))}</code>\n` +
+    `<b>Random:</b> <code>${escapeHtml(String(state?.random || ''))}</code>\n` +
+    `\n🔗 <b>Download:</b> <code>${escapeHtml(apiUrl)}</code>`;
+
+  const kb = buildImgKeyboard(state, apiUrl);
+
+  // Optional: delete old message to keep chat clean
+  if (replaceMessageId) {
+    try { await ctx.api.deleteMessage(ctx.chat.id, replaceMessageId); } catch (_) {}
+  }
+
+  try {
+    await ctx.replyWithPhoto(new InputFile(buf, fileName), {
+      caption,
+      parse_mode: 'HTML',
+      reply_markup: kb,
+      disable_web_page_preview: true
+    });
+  } catch (_) {
+    await ctx.replyWithDocument(new InputFile(buf, fileName), {
+      caption,
+      parse_mode: 'HTML',
+      reply_markup: kb,
+      disable_web_page_preview: true
+    });
+  }
+
+  // Persist state for inline buttons
+  const key = `${ctx.chat.id}:${ctx.from.id}`;
+  global.__imgCache.set(key, { ...state, apiUrl, lastMessageAt: Date.now() });
+
+  // Audit (download-ish action)
+  await adminAudit('imggen', ctx, `prompt="${prompt}" improve=${!!state?.improve} format=${state?.format || ''}`);
+}
+
+// Inline buttons handler
+bot.callbackQuery(/^imgopt_(improve|wide|random)$/, async (ctx) => {
+  try { await ctx.answerCallbackQuery(); } catch (_) {}
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return;
+  recordCommandUse(user, 'img');
+
+  const key = `${ctx.chat.id}:${ctx.from.id}`;
+  const st = global.__imgCache.get(key);
+
+  if (!st || !st.prompt) {
+    try { await ctx.reply('❌ Session expired. Use /img <prompt> again.'); } catch (_) {}
+    return;
+  }
+
+  // Each re-generate costs 1 credit
+  if (!deductCredits(user)) {
+    try { await ctx.reply('❌ Insufficient credits!'); } catch (_) {}
+    return;
+  }
+
+  const action = ctx.match?.[1];
+  if (action === 'improve') st.improve = !st.improve;
+  if (action === 'wide') st.format = (String(st.format || '').toLowerCase() === 'wide') ? '' : 'wide';
+  if (action === 'random') st.random = Math.random().toString(36).slice(2, 10);
+
+  try {
+    // show quick status
+    try { await ctx.editMessageCaption('🖼️ <b>Generating...</b>', { parse_mode: 'HTML' }); } catch (_) {}
+    await generateAndSendImage(ctx, user, st, { replaceMessageId: ctx.callbackQuery?.message?.message_id });
+  } catch (e) {
+    console.error('imgopt error:', e?.message || e);
+    refundCredits(user, 1);
+    try { await ctx.reply('❌ Failed to generate image.\n💳 1 credit refunded'); } catch (_) {}
+  }
+});
+
+bot.command(['img', 'imggen'], async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+
+  // Each generation costs 1 credit
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  const raw = String(getCommandArgs(ctx) || '').trim();
+  if (!raw) {
+    refundCredits(user, 1);
+    return sendFormattedMessage(ctx, '🖼️ Usage: /img <prompt>\nExample: /img spiderman');
+  }
+
+  // Simple flag parsing: allow "--improve", "--wide", "--format=wide", "--random=XXXX"
+  const parts = raw.split(/\s+/);
+  const promptParts = [];
+  const state = { prompt: '', improve: false, format: '', random: '' };
+
+  for (const p of parts) {
+    if (p === '--improve') state.improve = true;
+    else if (p === '--wide') state.format = 'wide';
+    else if (p.startsWith('--format=')) state.format = p.split('=')[1] || '';
+    else if (p.startsWith('--random=')) state.random = p.split('=')[1] || '';
+    else promptParts.push(p);
+  }
+
+  state.prompt = promptParts.join(' ').trim();
+  if (!state.prompt) {
+    refundCredits(user, 1);
+    return sendFormattedMessage(ctx, '🖼️ Usage: /img <prompt>\nExample: /img spiderman');
+  }
+
+  // A small "working" message, then send final media
+  let workingMsgId = null;
+  try {
+    const m = await ctx.reply('🖼️ Generating image...');
+    workingMsgId = m?.message_id || null;
+  } catch (_) {}
+
+  try {
+    await generateAndSendImage(ctx, user, state, { replaceMessageId: workingMsgId });
+    user.totalQueries++;
+  } catch (e) {
+    console.error('imggen error:', e?.message || e);
+    refundCredits(user, 1);
+    return sendFormattedMessage(ctx, '❌ Failed to generate image.\n💳 1 credit refunded');
   }
 });
 
@@ -2533,7 +2808,7 @@ async function handleSpotifySearch(ctx) {
 
   const q = getCommandArgs(ctx);
   if (!q) {
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, '🔎 Usage: /spsearch <song name / artist>');
   }
 
@@ -2569,7 +2844,7 @@ async function handleSpotifySearch(ctx) {
       [];
 
     if (!items.length) {
-      user.credits += 1;
+      refundCredits(user, 1);
       return sendFormattedMessage(ctx, '❌ No tracks found.');
     }
 
@@ -2644,7 +2919,7 @@ async function handleSpotifySearch(ctx) {
     return;
   } catch (e) {
     console.error('spsearch error:', e?.message || e);
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, '❌ Spotify search failed. Try again later.');
   }
 }
@@ -2661,7 +2936,7 @@ bot.command('spotify', async (ctx) => {
 
   const url = getCommandArgs(ctx);
   if (!url) {
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, '🎵 Usage: /spotify <spotify track url>');
   }
 
@@ -2699,7 +2974,7 @@ bot.command('spotify', async (ctx) => {
     }
 
     if (!isHttpUrl(audioUrl)) {
-      user.credits += 1;
+      refundCredits(user, 1);
       return sendFormattedMessage(ctx, '❌ Spotify audio link not found from API.');
     }
 
@@ -2745,7 +3020,7 @@ bot.command('spotify', async (ctx) => {
     return true;
   } catch (e) {
     console.error('spotify error:', e?.message || e);
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, '❌ Spotify download failed. Try again later.');
   }
 });
@@ -2762,7 +3037,7 @@ bot.command('yt', async (ctx) => {
 
   const input = getCommandArgs(ctx);
   if (!input) {
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, '🎬 Usage: /yt <youtube url>');
   }
 
@@ -2823,7 +3098,7 @@ bot.command('yt', async (ctx) => {
     }
 
     if (!urls.length) {
-      user.credits += 1;
+      refundCredits(user, 1);
       return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
     }
 
@@ -2832,7 +3107,7 @@ bot.command('yt', async (ctx) => {
     const u480 = pickQuality(urls, '480');
 
     if (!isHttpUrl(u1080) && !isHttpUrl(u720) && !isHttpUrl(u480)) {
-      user.credits += 1;
+      refundCredits(user, 1);
       return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
     }
 
@@ -2840,10 +3115,14 @@ bot.command('yt', async (ctx) => {
 
     
     // Show buttons as CALLBACKS (no browser open). We'll send links in chat text.
-    const kb = new InlineKeyboard()
-      .text('1080p', `ytq_1080`).row()
-      .text('720p', `ytq_720`).row()
-      .text('480p', `ytq_480`);
+    const kb = new InlineKeyboard();
+    if (isHttpUrl(u1080)) kb.text('1080p', `ytq_1080`).row();
+    if (isHttpUrl(u720))  kb.text('720p', `ytq_720`).row();
+    if (isHttpUrl(u480))  kb.text('480p', `ytq_480`);
+    if (!isHttpUrl(u1080) && !isHttpUrl(u720) && !isHttpUrl(u480)) {
+      refundCredits(user, 1);
+      return sendFormattedMessage(ctx, '❌ No downloadable qualities found for this video.');
+    }
 
     // Cache resolved URLs per-chat/user
     const key = `${ctx.chat.id}:${ctx.from.id}`;
@@ -2853,7 +3132,7 @@ bot.command('yt', async (ctx) => {
     return ctx.reply('🎬 Choose Quality:', { reply_markup: kb });
   } catch (e) {
     console.error('yt error:', e?.message || e);
-    user.credits += 1;
+    refundCredits(user, 1);
     return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.');
   }
 });
@@ -2861,12 +3140,17 @@ bot.command('yt', async (ctx) => {
 // ===============================
 // YT QUALITY CALLBACK (REAL-TIME PROGRESS + FINAL FILE URL IN CHAT)
 // ===============================
+// ===============================
+// YT QUALITY CALLBACK (REAL-TIME PROGRESS + ETA/SPEED + FINAL FILE URL IN CHAT)
+// ===============================
 bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
   try { await ctx.answerCallbackQuery(); } catch (_) {}
 
   const q = ctx.match?.[1] || '1080';
   const key = `${ctx.chat.id}:${ctx.from.id}`;
   const cache = global.__ytCache && global.__ytCache.get(key);
+  const u = getOrCreateUser(ctx);
+  if (u) recordCommandUse(u, 'yt');
 
   if (!cache) {
     try { return await ctx.reply('❌ Session expired. Please run /yt again.'); } catch (_) { return; }
@@ -2878,71 +3162,121 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
     cache.u480;
 
   if (!isHttpUrl(url)) {
-    return ctx.reply('❌ This quality is not available for this video.');
+    try { return await ctx.reply('❌ This quality is not available for this video.'); } catch (_) { return; }
   }
 
-  // ytcontent process link -> poll and edit message
+  // If it's a ytcontent "videoProcess" URL, poll and keep editing the same message with % + ETA + speed.
   if (/ytcontent\.net\/v3\/videoProcess\//i.test(url)) {
-    let last = {};
-    try {
-      const r = await axiosGetWithRetry(url, { timeout: 45000, responseType: 'json' }, 2);
-      last = r.data || {};
-    } catch (_) {
-      last = { percent: '0%' };
+    const intervalMs = 2500;
+    const maxTries = 90; // ~3.75 min
+
+    let lastPct = null;
+    let lastT = Date.now();
+    let lastTotalBytes = null;
+
+    function fmtEta(sec) {
+      if (!isFinite(sec) || sec <= 0) return '…';
+      const s = Math.floor(sec);
+      const mm = String(Math.floor(s / 60)).padStart(2, '0');
+      const ss = String(s % 60).padStart(2, '0');
+      return `${mm}:${ss}`;
+    }
+    function fmtSpeed(bps) {
+      if (!isFinite(bps) || bps <= 0) return '…';
+      const mbps = bps / (1024 * 1024);
+      return `${mbps.toFixed(2)} MB/s`;
     }
 
-    // show initial status
-    try { await ctx.editMessageText(formatYtProcessHtml(last, url), { parse_mode: 'HTML', disable_web_page_preview: true }); }
-    catch (_) { try { await ctx.reply(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); } catch (_) {} }
-
-    const intervalMs = 2500;
-    const maxTries = 80; // ~3.3 min
-
     for (let i = 0; i < maxTries; i++) {
-      const res = await axiosGetWithRetry(url, { timeout: 45000, responseType: 'json' }, 2);
-      last = res.data || last;
+      let data = {};
+      try {
+        const r = await axiosGetWithRetry(url, { timeout: 45000, responseType: 'json' }, 2);
+        data = r.data || {};
+      } catch (_) {
+        data = { percent: lastPct != null ? `${lastPct}%` : '…' };
+      }
 
-      const fileUrl = last.fileUrl || last.url || last.download || last.download_url || null;
+      const percentRaw = data?.percent ?? data?.progress ?? '…';
+      const m = String(percentRaw).match(/(\d+(\.\d+)?)/);
+      const pct = m ? parseFloat(m[1]) : null;
+
+      // total bytes (best-effort)
+      const totalBytes =
+        (typeof data?.fileSizeBytes === 'number' && data.fileSizeBytes) ||
+        (typeof data?.fileSize === 'number' && data.fileSize) ||
+        (typeof data?.estimatedFileSizeBytes === 'number' && data.estimatedFileSizeBytes) ||
+        lastTotalBytes ||
+        null;
+      if (totalBytes) lastTotalBytes = totalBytes;
+
+      // compute speed and eta from percent delta
+      const now = Date.now();
+      const dtSec = Math.max(0.001, (now - lastT) / 1000);
+
+      let speedText = '';
+      let etaText = '';
+
+      if (pct != null && lastPct != null && pct > lastPct) {
+        const ratePctPerSec = (pct - lastPct) / dtSec;
+        etaText = fmtEta((100 - pct) / ratePctPerSec);
+
+        if (totalBytes) {
+          const downloadedNow = totalBytes * (pct / 100);
+          const downloadedPrev = totalBytes * (lastPct / 100);
+          const bps = (downloadedNow - downloadedPrev) / dtSec;
+          speedText = fmtSpeed(bps);
+        } else {
+          // fallback: show %/s as "speed"
+          speedText = `${ratePctPerSec.toFixed(2)} %/s`;
+        }
+      } else {
+        speedText = '…';
+        etaText = '…';
+      }
+
+      // Update message
+      try {
+        await ctx.editMessageText(
+          formatYtProcessHtml(data, url, { speedText, etaText }),
+          { parse_mode: 'HTML', disable_web_page_preview: true }
+        );
+      } catch (_) {
+        // ignore edit errors (e.g., message too old)
+      }
+
+      lastT = now;
+      if (pct != null) lastPct = pct;
+
+      const fileUrl = data.fileUrl || data.url || data.download || data.download_url || null;
       const ready = typeof fileUrl === 'string' && /^https?:\/\//i.test(fileUrl) && !/in\s*processing/i.test(fileUrl);
-
-      try { await ctx.editMessageText(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); } catch (_) {}
 
       if (ready) {
         await ctx.reply(
-          `✅ *${q}p Ready!*
-
-⬇️ File URL:
-${fileUrl}`,
+          `✅ *${q}p Ready!*\n\n⬇️ File URL:\n${fileUrl}`,
           { parse_mode: 'Markdown', disable_web_page_preview: true }
         );
         try { await sendVideoSmart(ctx, fileUrl, `🎬 YouTube ${q}p`); } catch (_) {}
+        await adminAudit('yt_download_ready', ctx, `${q}p | ${fileUrl}`);
         return;
       }
 
       await sleep(intervalMs);
     }
 
-    return ctx.reply(
-      `⏳ Still processing.
-
-Progress: ${last?.percent || '…'}
-File URL: ${last?.fileUrl || 'In Processing...'}
-
-Try again in a bit or press quality again.`,
-      { disable_web_page_preview: true }
-    );
+    // Timed out
+    await ctx.reply('❌ Processing timed out. Try again later.');
+    return;
   }
 
-  // Direct URL
+  // Direct URL (already ready)
   await ctx.reply(
-    `✅ *YouTube ${q}p*
-
-⬇️ Download URL:
-${url}`,
+    `✅ *YouTube ${q}p*\n\n⬇️ Download URL:\n${url}`,
     { parse_mode: 'Markdown', disable_web_page_preview: true }
   );
   try { await sendVideoSmart(ctx, url, `🎬 YouTube ${q}p`); } catch (_) {}
+  await adminAudit('yt_download_ready', ctx, `${q}p | ${url}`);
 });
+
 
 
 // OSINT Commands
@@ -2979,13 +3313,13 @@ bot.command('ip', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please check the IP address and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ip command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching IP information.\n💳 1 credit refunded');
   }
 });
@@ -3028,13 +3362,13 @@ bot.command('email', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to validate email address. Please check the email and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in email command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while validating email address.\n💳 1 credit refunded');
   }
 });
@@ -3077,13 +3411,13 @@ bot.command('num', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to lookup phone number. Please check the number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in num command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up phone number.\n💳 1 credit refunded');
   }
 });
@@ -3126,13 +3460,13 @@ bot.command('basicnum', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to get basic number information. Please check the number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in basicnum command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while getting basic number information.\n💳 1 credit refunded');
   }
 });
@@ -3188,13 +3522,13 @@ bot.command('paknum', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, `❌ ${result.error || 'No records found for the provided number or CNIC'}\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in paknum command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani government number information.\n💳 1 credit refunded');
   }
 });
@@ -3228,12 +3562,12 @@ bot.command('pincode', async (ctx) => {
       await sendLongOrFile(ctx, response, `pincode_${pincode}`);
       user.totalQueries++;
     } else {
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to fetch pincode info'}\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in pincode command:', error);
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching pincode info.\n💳 1 credit refunded');
   }
 });
@@ -3265,12 +3599,12 @@ bot.command('postoffice', async (ctx) => {
       await sendLongOrFile(ctx, response, `postoffice_${query}`);
       user.totalQueries++;
     } else {
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to fetch post office info'}\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in postoffice command:', error);
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching post office info.\n💳 1 credit refunded');
   }
 });
@@ -3305,12 +3639,12 @@ bot.command('pak', async (ctx) => {
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, `❌ ${result.error || 'No data found'}\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in pak command:', error);
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching /pak info.\n💳 1 credit refunded');
   }
 });
@@ -3370,12 +3704,12 @@ bot.command('ifsc', async (ctx) => {
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, `❌ ${result.error || 'Failed to fetch IFSC info'}\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in ifsc command:', error);
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching IFSC info.\n💳 1 credit refunded');
   }
 });
@@ -3423,13 +3757,13 @@ bot.command('ig', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to fetch Instagram information. Please check the username and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ig command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching Instagram information.\n💳 1 credit refunded');
   }
 });
@@ -3465,7 +3799,7 @@ bot.command('igreels', async (ctx) => {
   } catch (_) {}
 
   if (!username || username.length < 2) {
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ Invalid username.\n💳 1 credit refunded');
     return;
   }
@@ -3487,12 +3821,12 @@ ${JSON.stringify(result.data, null, 2)}
       await sendLongOrFile(ctx, response, `igreels_${username}`);
       user.totalQueries++;
     } else {
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, `❌ Failed to fetch reels/posts information.\n💳 1 credit refunded`);
     }
   } catch (error) {
     console.error('Error in igreels command:', error);
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching reels/posts information.\n💳 1 credit refunded');
   }
 });
@@ -3532,12 +3866,12 @@ ${JSON.stringify(result.data, null, 2)}
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to fetch PAN information.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in pan command:', error);
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching PAN information.\n💳 1 credit refunded');
   }
 });
@@ -3578,12 +3912,12 @@ ${JSON.stringify({ data: result.data, success: true }, null, 2)}
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to fetch Telegram info.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in tginfo command:', error);
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching Telegram info.\n💳 1 credit refunded');
   }
 });
@@ -3626,13 +3960,13 @@ bot.command('bin', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to lookup BIN information. Please check the BIN and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in bin command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while looking up BIN information.\n💳 1 credit refunded');
   }
 });
@@ -3651,7 +3985,7 @@ bot.command('deepbin', async (ctx) => {
 
   const bin = (ctx.match || '').trim();
   if (!bin) {
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '💳 Usage: /deepbin <6-10 digit BIN>\nExample: /deepbin 400191\n💳 1 credit refunded');
     return;
   }
@@ -3673,12 +4007,12 @@ ${JSON.stringify(result.data, null, 2)}
       await sendFormattedMessage(ctx, response);
       user.totalQueries++;
     } else {
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to fetch Deep BIN info.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in deepbin command:', error);
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching Deep BIN info.\n💳 1 credit refunded');
   }
 });
@@ -3883,7 +4217,7 @@ bot.command('tempmail', async (ctx) => {
   } catch (e) {
     console.error('tempmail error:', e?.message || e);
     // If action was 'new' we already deducted 1 credit; refund on failure
-    if ((action === 'new') && user && !user.isPremium) user.credits += 1;
+    if ((action === 'new') && user && !user.isPremium) refundCredits(user, 1);
     return sendFormattedMessage(ctx, `❌ TempMail failed. Try again.\n\nTip: /tempmail new`);
   }
 });
@@ -3966,13 +4300,13 @@ bot.command('vehicle', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to fetch vehicle details. Please check the vehicle number and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in vehicle command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching vehicle details.\n💳 1 credit refunded');
   }
 });
@@ -4015,13 +4349,13 @@ bot.command('ff', async (ctx) => {
       user.totalQueries++;
     } else {
       // Refund credit on failure
-      user.credits += 1;
+      refundCredits(user, 1);
       await sendFormattedMessage(ctx, '❌ Failed to fetch Free Fire statistics. Please check the UID and try again.\n💳 1 credit refunded');
     }
   } catch (error) {
     console.error('Error in ff command:', error);
     // Refund credit on error
-    user.credits += 1;
+    refundCredits(user, 1);
     await sendFormattedMessage(ctx, '❌ An error occurred while fetching Free Fire statistics.\n💳 1 credit refunded');
   }
 });
