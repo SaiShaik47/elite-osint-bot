@@ -1597,7 +1597,10 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /twtdl <url> — Twitter/X images
 • /ai <text> — AI chat (GPT-5)
 • /spotify <url> — Spotify track download
+• /spsearch <query> — Spotify search (track/artist/album)
 • /yt <url> — YouTube downloader
+
+• /help — Help & commands
 `;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
@@ -1630,9 +1633,15 @@ bot.callbackQuery("menu_help", async (ctx) => {
 
 ⚠️ *Educational purpose only*
 
+📥 *Commands*
+• /help — This help
+• /credits — Check your balance
+• /register — Register your account
+
 📥 *New in v8*
 • /ai <text>
 • /spotify <url>
+• /spsearch <query>
 • /yt <url>`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
@@ -2276,11 +2285,11 @@ async function handleSpotifySearch(ctx) {
         '';
 
       const lines = [];
-      lines.push(`🎵 *${escapeMd(String(title))}*`);
-      if (artist) lines.push(`👤 *Artist:* ${escapeMd(String(artist))}`);
-      if (album) lines.push(`💽 *Album:* ${escapeMd(String(album))}`);
-      if (release) lines.push(`📅 *Release:* ${escapeMd(String(release))}`);
-      if (duration) lines.push(`⏱ *Duration:* ${escapeMd(String(duration))}`);
+      lines.push(`🎵 ${String(title)}`);
+      if (artist) lines.push(`👤 Artist: ${String(artist)}`);
+      if (album) lines.push(`💽 Album: ${String(album)}`);
+      if (release) lines.push(`📅 Release: ${String(release)}`);
+      if (duration) lines.push(`⏱️ Duration: ${String(duration)}`);
       lines.push(`🔗 *Track:* ${isHttpUrl(trackUrl) ? trackUrl : 'N/A'}`);
       lines.push(`🎧 *Preview:* ${isHttpUrl(preview) ? preview : 'No preview available'}`);
 
@@ -2290,14 +2299,13 @@ async function handleSpotifySearch(ctx) {
         try {
           await ctx.replyWithPhoto(thumb, {
             caption: msg,
-            parse_mode: 'Markdown',
             disable_web_page_preview: true
           });
         } catch (e) {
-          await sendFormattedMessage(ctx, msg);
+          await ctx.reply(msg, { disable_web_page_preview: true });
         }
       } else {
-        await sendFormattedMessage(ctx, msg);
+        await ctx.reply(msg, { disable_web_page_preview: true });
       }
 
       // small delay to avoid flood
