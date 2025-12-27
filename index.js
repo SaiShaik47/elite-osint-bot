@@ -2122,6 +2122,132 @@ async function guardedImageDownloader(ctx, kind, prettyName) {
 bot.command('igdl', (ctx) => guardedImageDownloader(ctx, 'ig', 'Instagram'));
 bot.command('pindl', (ctx) => guardedImageDownloader(ctx, 'pin', 'Pinterest'));
 bot.command('twtdl', (ctx) => guardedImageDownloader(ctx, 'tw', 'Twitter/X'));
+// ===============================
+// NEW (v8): AI + Spotify + YouTube
+// ===============================
+bot.command('ai', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  const prompt = (ctx.match || '').trim();
+  if (!prompt) {
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '🤖 Usage: /ai <your text>');
+  }
+
+  await sendFormattedMessage(ctx, '🤖 Thinking...');
+
+  try {
+    const url = `https://flip-apiakib.vercel.app/ai/gpt-5?text=${encodeURIComponent(prompt)}`;
+    const res = await axiosGetWithRetry(url, { timeout: 30000 }, 2);
+    const data = res.data || {};
+
+    const answer =
+      (typeof data === 'string' ? data : null) ||
+      data.response ||
+      data.result ||
+      data.answer ||
+      data.data ||
+      JSON.stringify(data, null, 2);
+
+    user.totalQueries++;
+
+    // Keep Markdown safe
+    const safe = escapeMd(String(answer));
+    return ctx.reply(`🤖 *AI Response*\n\n${safe}`, { parse_mode: 'Markdown' });
+  } catch (e) {
+    console.error('ai error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ AI request failed. Try again.');
+  }
+});
+
+bot.command('spotify', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  const url = (ctx.match || '').trim();
+  if (!url) {
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '🎵 Usage: /spotify <spotify track url>');
+  }
+
+  await sendFormattedMessage(ctx, '🎵 Fetching Spotify download...');
+
+  try {
+    const api = `https://flip-apiakib.vercel.app/spotify/download?url=${encodeURIComponent(url)}`;
+    const res = await axiosGetWithRetry(api, { timeout: 35000 }, 2);
+    const data = res.data || {};
+
+    // Try common keys, then deep-scan
+    let dl = null;
+    if (isHttpUrl(data.download)) dl = data.download;
+    else if (isHttpUrl(data.url)) dl = data.url;
+    else if (isHttpUrl(data.audio)) dl = data.audio;
+    else dl = findFirstUrlDeep(data);
+
+    if (!isHttpUrl(dl)) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ Spotify download link not found from API.');
+    }
+
+    user.totalQueries++;
+
+    // Send as DOCUMENT to preserve quality (no Telegram audio/preview compression)
+    await ctx.replyWithDocument(dl, { caption: '🎵 Spotify Track (HD)' });
+    return true;
+  } catch (e) {
+    console.error('spotify error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ Spotify download failed. Try again later.');
+  }
+});
+
+bot.command('yt', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  const url = (ctx.match || '').trim();
+  if (!url) {
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '🎬 Usage: /yt <youtube url>');
+  }
+
+  await sendFormattedMessage(ctx, '🎬 Fetching YouTube download...');
+
+  try {
+    const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(url)}`;
+    const res = await axiosGetWithRetry(api, { timeout: 45000 }, 2);
+    const data = res.data || {};
+
+    let dl = null;
+    if (isHttpUrl(data.download)) dl = data.download;
+    else if (isHttpUrl(data.url)) dl = data.url;
+    else if (isHttpUrl(data.video)) dl = data.video;
+    else dl = findFirstUrlDeep(data);
+
+    if (!isHttpUrl(dl)) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
+    }
+
+    user.totalQueries++;
+
+    // Prefer smart send (video if small), else link
+    await sendVideoSmart(ctx, dl, '🎬 YouTube Video');
+    return true;
+  } catch (e) {
+    console.error('yt error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.');
+  }
+});
 
 // OSINT Commands
 bot.command('ip', async (ctx) => {
@@ -2979,7 +3105,7 @@ bot.command('tempmail', async (ctx) => {
       const s = await ensureSession(ctx);
 
       const msg =
-`📨 *TempMail v7* (Inbox Enabled)
+`📨 *TempMail v8* (Inbox Enabled)
 
 ✅ *Your Temp Email:*
 \`${s.address}\`
