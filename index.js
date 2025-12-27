@@ -2178,15 +2178,8 @@ bot.command('ai', async (ctx) => {
 
     user.totalQueries++;
 
-	    // Reply ONLY the text (no JSON) and avoid Markdown parsing issues.
-	    // Some APIs return Markdown-escaped characters (e.g. \\* or \\_). We lightly unescape them.
-	    const plain = String(answer)
-	      .replace(/\\\\([_*\[\](){}#+\-.!|>~`=])/g, '$1')
-	      .trim();
-
-	    return ctx.api.sendMessage(ctx.chat.id, plain, {
-	      disable_web_page_preview: true,
-	    });
+    // Reply only the text (no JSON)
+    return ctx.reply(String(answer));
   } catch (e) {
     console.error('ai error:', e?.message || e);
     user.credits += 1;
@@ -2308,65 +2301,12 @@ bot.command('yt', async (ctx) => {
   try {
     const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(url)}`;
     const res = await axiosGetWithRetry(api, { timeout: 45000 }, 2);
-    const raw = res.data || {};
-    const data = raw?.result || raw?.data || raw;
+    const data = res.data || {};
 
-    // Collect URLs, but strongly prefer real media URLs (avoid description links like starbucks, youtube watch, etc.)
+    // Collect all URLs from response and prefer MP4
     const allUrls = findAllUrlsDeep(data);
-
-    const isLikelyMedia = (u) => {
-      const s = String(u || '');
-      if (!isHttpUrl(s)) return false;
-      // Exclude common non-media links that may appear in description/metadata
-      if (/starbucks\.app\.link|twitter\.com|tiktok\.com|instagram\.com|facebook\.com|youtu\.be\/(?!.*videoplayback)|youtube\.com\/(watch|shorts|channel|@)/i.test(s)) return false;
-      // Prefer googlevideo / videoplayback / mime video
-      return (
-        /googlevideo\.com|videoplayback/i.test(s) ||
-        /\.mp4(\?|$)/i.test(s) ||
-        /mime=video/i.test(s) ||
-        /\/video\//i.test(s)
-      );
-    };
-
-    const scoreMedia = (u) => {
-      const s = String(u || '').toLowerCase();
-      let score = 0;
-      if (/googlevideo\.com|videoplayback/.test(s)) score += 200;
-      if (/mime=video/.test(s)) score += 120;
-      if (/mime=video%2fmp4|video%2fmp4|\.mp4(\?|$)/.test(s)) score += 100;
-      // Prefer "progressive"/muxed hints if present
-      if (/progressive|mux|withaudio|audio=1|hasaudio/.test(s)) score += 60;
-      // Slightly prefer links with "ratebypass" (often smoother)
-      if (/ratebypass/.test(s)) score += 10;
-      // Penalize obvious thumbnails
-      if (/thumb|thumbnail|hqdefault|mqdefault|sddefault|maxresdefault/.test(s)) score -= 120;
-      return score;
-    };
-
-    // Some APIs expose direct media url keys
-    const directCandidates = [
-      data?.download,
-      data?.downloadUrl,
-      data?.download_url,
-      data?.video,
-      data?.videoUrl,
-      data?.video_url,
-      data?.url,
-      data?.link,
-      data?.mp4,
-      data?.mp4Url,
-      data?.mp4_url,
-    ].filter(Boolean);
-
-    const candidates = [...directCandidates, ...allUrls].filter(isLikelyMedia);
-
-    // As a last resort (if API doesn't expose media URLs cleanly), keep mp4s from the full response,
-    // but still avoid obvious metadata links.
-    const fallbackMp4s = findAllUrlsDeep(raw).filter(u => /\.mp4(\?|$)/i.test(String(u || '')));
-    const finalCandidates = candidates.length ? candidates : fallbackMp4s;
-
-    // Pick best scored
-    const chosen = (finalCandidates || []).sort((a, b) => scoreMedia(b) - scoreMedia(a))[0] || null;
+    const mp4Urls = allUrls.filter(u => /\.mp4(\?|$)/i.test(u) || /mime=video/i.test(u) || /video/i.test(u));
+    const chosen = (mp4Urls[0] || allUrls[0]) || null;
 
     if (!isHttpUrl(chosen)) {
       user.credits += 1;
@@ -2375,23 +2315,26 @@ bot.command('yt', async (ctx) => {
 
     user.totalQueries++;
 
-    // Send as VIDEO (so Telegram plays with audio if link is muxed/progressive)
+    // User wants VIDEO type in chat.
     try {
-      await ctx.replyWithVideo(chosen, { caption: '🎬 YouTube Video', supports_streaming: true });
+      await ctx.replyWithVideo(chosen, { caption: '🎬 YouTube Video' });
     } catch (sendErr) {
-      // If Telegram can't fetch or the file is too big, send link as plain text (no preview)
-      await ctx.reply(`🎬 Video link:\n${chosen}`, { disable_web_page_preview: true });
+      // If Telegram can't fetch or the file is too big, send links as plain text
+      await ctx.reply(`🎬 Video link:\n${chosen}`, {
+        disable_web_page_preview: true,
+      });
     }
 
-    // Send extra options one-by-one as links (no preview)
-    const extras = (finalCandidates || []).filter(u => u !== chosen).slice(0, 5);
-    for (const u of extras) {
+    // If there are more options, send one-by-one as links
+    const options = mp4Urls.length ? mp4Urls : allUrls;
+    const extra = options.filter(u => u !== chosen).slice(0, 5);
+    for (const u of extra) {
       await ctx.reply(`⬇️ Option link:\n${u}`, { disable_web_page_preview: true });
     }
 
     return true;
   } catch (e) {
-    console.error('yt error:', e?.response?.status, e?.message || e);
+    console.error('yt error:', e?.message || e);
     user.credits += 1;
     return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.');
   }
