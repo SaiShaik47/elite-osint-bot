@@ -687,6 +687,8 @@ const adminId = process.env.ADMIN_USER_ID;
 const BOTMETA_DATA_DIR = process.env.DATA_DIR || '/data';
 const META_FILE = require('path').join(BOTMETA_DATA_DIR, 'bot_meta.json');
 let BOT_VERSION = 'v9';
+// Footer is annoying if always on; keep it OFF by default and allow admins to toggle.
+let FOOTER_ENABLED = false;
 
 function _loadBotMeta() {
   try {
@@ -694,6 +696,9 @@ function _loadBotMeta() {
       const meta = JSON.parse(require('fs').readFileSync(META_FILE, 'utf8'));
       if (meta && typeof meta.version === 'string' && meta.version.trim()) {
         BOT_VERSION = meta.version.trim();
+      }
+      if (meta && typeof meta.footerEnabled === 'boolean') {
+        FOOTER_ENABLED = meta.footerEnabled;
       }
     }
   } catch (e) {
@@ -704,7 +709,11 @@ function _loadBotMeta() {
 function _saveBotMeta() {
   try {
     require('fs').mkdirSync(BOTMETA_DATA_DIR, { recursive: true });
-    require('fs').writeFileSync(META_FILE, JSON.stringify({ version: BOT_VERSION }, null, 2), 'utf8');
+    require('fs').writeFileSync(
+      META_FILE,
+      JSON.stringify({ version: BOT_VERSION, footerEnabled: FOOTER_ENABLED }, null, 2),
+      'utf8'
+    );
   } catch (e) {
     console.error('[META] Failed to save bot meta:', e.message);
   }
@@ -715,6 +724,7 @@ _loadBotMeta();
 function _appendVersionFooter(text) {
   if (typeof text !== 'string' || !text) return text;
   if (text.includes('🧩 Version:')) return text;
+  if (!FOOTER_ENABLED) return text;
   return `${text}\n━━━━━━━━━━━━\n🧩 Version: ${BOT_VERSION}`;
 }
 
@@ -2310,6 +2320,17 @@ bot.command('setversion', async (ctx) => {
   _saveBotMeta();
 
   return ctx.reply(`✅ Version updated\nOld: ${oldV}\nNew: ${BOT_VERSION}`);
+});
+
+// Admin-only togglefooter command (controls version footer spam)
+bot.command('togglefooter', async (ctx) => {
+  const caller = String(ctx.from?.id || '');
+  if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
+
+  FOOTER_ENABLED = !FOOTER_ENABLED;
+  _saveBotMeta();
+
+  return ctx.reply(`🧩 Version footer is now: ${FOOTER_ENABLED ? 'ON' : 'OFF'}`);
 });
 
 bot.command('start', async (ctx) => {
@@ -5208,6 +5229,15 @@ bot.command('admin', async (ctx) => {
   const premiumUsers = Array.from(users.values()).filter(u => u.isPremium).length;
 
   const adminPanel = `🌟 ⚡ ELITE ADMIN CONTROL PANEL ⚡ 🌟
+
+🧩 🔧 Version & UI:
+• /setversion <vX> - 🧩 Set bot version
+• /togglefooter - 🧩 Toggle version footer (ON/OFF)
+• /adminaudit [n] - 🧾 View last n audit entries
+
+🚫 🛡️ Moderation:
+• /ban <id | @username | reply> - 🚫 Ban user
+• /unban <id | @username | reply> - ✅ Unban user
 
 💎 💰 Credit Management Commands:
 • /give <user_id> <amount> - 🎁 Grant credits to user
