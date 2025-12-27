@@ -122,6 +122,26 @@ if (!botToken) {
 // Initialize bot
 const bot = new Bot(botToken);
 
+// ===============================
+// BAN MIDDLEWARE (blocks banned users globally)
+// ===============================
+bot.use(async (ctx, next) => {
+  try {
+    const uid = ctx.from?.id ? String(ctx.from.id) : null;
+    if (!uid) return next();
+
+    // Admins bypass bans
+    if (isAdmin(uid) || uid === String(adminId)) return next();
+
+    if (bannedUsers.has(uid)) {
+      const b = bannedUsers.get(uid) || {};
+      const reason = b.reason ? `\n\n📝 Reason: ${b.reason}` : '';
+      return ctx.reply(`⛔ You are banned from using this bot.${reason}`);
+    }
+  } catch (_) {}
+  return next();
+});
+
 
 // ===============================
 // GLOBAL COMMAND + RESPONSE LOGGER
@@ -298,6 +318,13 @@ const users = new Map();
 const registrationRequests = new Map();
 const verifiedUsers = new Set(); // Track users who have verified channel membership
 const registeredUsers = new Set(); // Track users who have completed registration
+
+// Ban system (in-memory; resets on restart)
+// bannedUsers: Map<telegramId, { by: string, at: string, reason: string }>
+const bannedUsers = new Map();
+
+// Auto-register toggle (admin controlled)
+let autoRegisterEnabled = true; // ON by default
 
 // Redeem code storage (in-memory; resets on restart)
 // code -> { credits, maxUses, uses, redeemedBy:Set<string>, createdBy, createdAt, expiresAt }
@@ -1451,6 +1478,94 @@ async function notifyAdmin(message, keyboard) {
 }
 
 // ===============================
+// ADMIN: /ban /unban /autoregister
+// ===============================
+function isTruthyOn(v) {
+  return ['on', 'true', '1', 'enable', 'enabled', 'yes', 'y'].includes(String(v || '').toLowerCase());
+}
+function isTruthyOff(v) {
+  return ['off', 'false', '0', 'disable', 'disabled', 'no', 'n'].includes(String(v || '').toLowerCase());
+}
+
+// Resolve a user identifier: numeric ID or @username
+async function resolveUserId(identifier) {
+  const raw = String(identifier || '').trim();
+  if (!raw) return null;
+
+  // numeric
+  if (/^\\d+$/.test(raw)) return raw;
+
+  // @username
+  if (raw.startsWith('@')) {
+    try {
+      const chat = await bot.api.getChat(raw);
+      if (chat?.id) return String(chat.id);
+    } catch (_) {}
+  }
+  return null;
+}
+
+bot.command('ban', async (ctx) => {
+  const caller = String(ctx.from?.id || '');
+  if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
+
+  const args = (ctx.match || '').toString().trim();
+  if (!args) return ctx.reply('❌ Usage: /ban <userId|@username> [reason]');
+
+  const [targetRaw, ...reasonParts] = args.split(/\\s+/);
+  const targetId = await resolveUserId(targetRaw);
+  if (!targetId) return ctx.reply('❌ Could not resolve that user. Use numeric ID or @username.');
+
+  if (isAdmin(targetId)) return ctx.reply('❌ You cannot ban an admin.');
+
+  const reason = reasonParts.join(' ').trim();
+  const at = new Date().toISOString();
+  bannedUsers.set(String(targetId), { by: caller, at, reason });
+
+  // notify target (best-effort)
+  try {
+    await bot.api.sendMessage(targetId, `⛔ You have been banned from using this bot.${reason ? `\\n\\n📝 Reason: ${reason}` : ''}`);
+  } catch (_) {}
+
+  return ctx.reply(`✅ Banned: ${targetId}${reason ? `\\n📝 Reason: ${reason}` : ''}`);
+});
+
+bot.command('unban', async (ctx) => {
+  const caller = String(ctx.from?.id || '');
+  if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
+
+  const args = (ctx.match || '').toString().trim();
+  if (!args) return ctx.reply('❌ Usage: /unban <userId|@username>');
+
+  const targetId = await resolveUserId(args.split(/\\s+/)[0]);
+  if (!targetId) return ctx.reply('❌ Could not resolve that user. Use numeric ID or @username.');
+
+  const existed = bannedUsers.delete(String(targetId));
+  if (!existed) return ctx.reply('ℹ️ That user was not banned.');
+
+  // notify target (best-effort)
+  try { await bot.api.sendMessage(targetId, '✅ You have been unbanned. You can use the bot again.'); } catch (_) {}
+
+  return ctx.reply(`✅ Unbanned: ${targetId}`);
+});
+
+bot.command('autoregister', async (ctx) => {
+  const caller = String(ctx.from?.id || '');
+  if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
+
+  const arg = (ctx.match || '').toString().trim().toLowerCase();
+  if (!arg) {
+    return ctx.reply(`⚙️ Auto-register is currently: *${autoRegisterEnabled ? 'ON' : 'OFF'}*\\n\\nUsage: /autoregister on | off`, { parse_mode: 'Markdown' });
+  }
+
+  if (isTruthyOn(arg)) autoRegisterEnabled = true;
+  else if (isTruthyOff(arg)) autoRegisterEnabled = false;
+  else return ctx.reply('❌ Usage: /autoregister on | off');
+
+  return ctx.reply(`✅ Auto-register is now: *${autoRegisterEnabled ? 'ON' : 'OFF'}*`, { parse_mode: 'Markdown' });
+});
+
+// ===============================
 // GLOBAL BOT LOCK MIDDLEWARE
 // ===============================
 bot.use(async (ctx, next) => {
@@ -1750,16 +1865,58 @@ bot.command('register', async (ctx) => {
   }
 
   // Mark verified automatically
-  verifiedUsers.add(userId);
+  verifiedUsers.add(String(userId));
 
-  // Already registered
-  if (registeredUsers.has(userId)) {
+  // Already registered (approved)
+  const existing = users.get(String(userId));
+  if (existing?.isApproved) {
     return ctx.reply('✅ You are already registered.');
   }
 
-  // Auto approve
-  registeredUsers.add(userId);
-  
+  // If auto-register is OFF -> send approval request to admin
+  if (!autoRegisterEnabled) {
+    // Store request
+    registrationRequests.set(String(userId), {
+      telegramId: String(userId),
+      username: ctx.from.username || null,
+      firstName: ctx.from.first_name || null,
+      lastName: ctx.from.last_name || null,
+      at: new Date().toISOString()
+    });
+
+    const name = ctx.from.username ? `@${ctx.from.username}` : (ctx.from.first_name || String(userId));
+    await ctx.reply('🕵️ Registration request sent for approval.\n\n⏳ Please wait for admin approval.');
+
+    // Admin buttons
+    const keyboard = new InlineKeyboard()
+      .text('✅ Approve', `approve_${userId}`)
+      .text('❌ Reject', `reject_${userId}`);
+
+    // Send details to admin
+    const details =
+`🆕 *Registration Request*
+
+👤 User: ${escapeMd(String(name))}
+🆔 ID: \`${escapeMd(String(userId))}\`
+🌐 Lang: \`${escapeMd(String(ctx.from.language_code || 'N/A'))}\`
+🕒 Time: \`${escapeMd(new Date().toISOString())}\`
+
+Approve or Reject:`;
+
+    // Notify all admins in ADMINS list
+    for (const a of ADMINS) {
+      if (!a) continue;
+      try {
+        await bot.api.sendMessage(a, details, { parse_mode: 'Markdown', reply_markup: keyboard });
+      } catch (_) {}
+    }
+
+    return;
+  }
+
+  // Auto-register ON -> auto approve
+  registeredUsers.add(String(userId));
+
   // Create or update user record
   const user = getOrCreateUser(ctx);
   user.isApproved = true;
@@ -1770,10 +1927,10 @@ bot.command('register', async (ctx) => {
     '✅ Your account is automatically approved.'
   );
 
-  // Auto-send main menu (no need to run /start again)
+  // Auto-send main menu
   await sendApprovedWelcome(ctx, user);
 
-  // 🔔 Admin notification ONLY (no approval needed)
+  // 🔔 Admin notification
   const name = ctx.from.username
     ? `@${ctx.from.username}`
     : ctx.from.first_name || userId;
@@ -1788,20 +1945,17 @@ bot.command('register', async (ctx) => {
   });
 
   // 📢 Auto-log new registrations to @OsintShitUpdates
-  // NOTE: Bot must be an admin in the channel to post messages.
   try {
     const u = getOrCreateUser(ctx);
     const fullNameRaw = [ctx.from.first_name, ctx.from.last_name].filter(Boolean).join(' ').trim();
     const usernameRaw = ctx.from.username ? `@${ctx.from.username}` : 'N/A';
     const langRaw = ctx.from.language_code || 'N/A';
-    // Phone can only be collected if the user shares contact with the bot
     const phoneFromContact = ctx.message?.contact?.phone_number || null;
     if (phoneFromContact) {
       try { u.phone = phoneFromContact; } catch (_) {}
     }
     const phoneRaw = phoneFromContact || (u && u.phone) || 'Not provided';
 
-    // Bio is best-effort via getChat (may fail if bot can't access)
     let bioRaw = 'N/A';
     try {
       const chat = await bot.api.getChat(userId);
@@ -1810,18 +1964,14 @@ bot.command('register', async (ctx) => {
 
     const now = new Date();
 
-    // Use HTML mode (more stable than Markdown; avoids parse crashes)
     const channelMsg =
       `🆕 <b>New Registration</b>\n\n` +
       `👤 <b>Name:</b> ${escapeHtml(fullNameRaw || 'N/A')}\n` +
       `🔖 <b>Username:</b> ${escapeHtml(usernameRaw)}\n` +
       `🆔 <b>User ID:</b> <code>${escapeHtml(String(userId))}</code>\n` +
-      `🌐 <b>Language:</b> ${escapeHtml(langRaw)}
-` +
-      `📞 <b>Phone:</b> ${escapeHtml(String(phoneRaw))}
-` +
-      `📝 <b>Bio:</b> ${escapeHtml(String(bioRaw))}
-` +
+      `🌐 <b>Language:</b> ${escapeHtml(langRaw)}\n` +
+      `📞 <b>Phone:</b> ${escapeHtml(String(phoneRaw))}\n` +
+      `📝 <b>Bio:</b> ${escapeHtml(String(bioRaw))}\n` +
       `🪙 <b>Starting Credits:</b> ${escapeHtml(String((u && typeof u.credits !== 'undefined') ? u.credits : 25))}\n` +
       `✅ <b>Approved:</b> ${escapeHtml(String((u && u.isApproved) ? 'Yes' : 'No'))}\n` +
       `📅 <b>Registered At:</b> ${escapeHtml(now.toLocaleString())}\n`;
@@ -1834,7 +1984,6 @@ bot.command('register', async (ctx) => {
     console.error('[REG LOG CHANNEL ERROR]', e);
   }
 });
-
 // ===============================
 // VERIFY BUTTON HANDLER
 // ===============================
