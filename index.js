@@ -3017,7 +3017,8 @@ async function generateAndSendImage(ctx, user, state, { replaceMessageId = null 
     `<b>Improve:</b> <code>${state?.improve ? 'true' : 'false'}</code>\n` +
     `<b>Format:</b> <code>${escapeHtml(String(state?.format || 'default'))}</code>\n` +
     `<b>Random:</b> <code>${escapeHtml(String(state?.random || ''))}</code>\n` +
-    `\n🔗 <b>Download:</b> <code>${escapeHtml(apiUrl)}</code>`;
+    `
+🔗 <b>Download:</b> <a href="${escapeHtml(apiUrl)}">Open</a>`;
 
   const kb = buildImgKeyboard(state, apiUrl);
 
