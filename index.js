@@ -2202,6 +2202,8 @@ async function sendApprovedWelcome(ctx, user) {
 💳 *Credits:* *${user.credits}* 🪙
 ${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
 
+✨ Try: /imggen <prompt> (AI Image)
+
 Choose a category:`;
 
   return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: mainMenuKeyboard(ctx.from.id) });
@@ -2298,6 +2300,7 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /spotify <url> — Spotify track download
 • /spsearch <query> — Spotify search
 • /yt <url> — YouTube downloader
+• /imggen <prompt> — Image generator (Improve/Wide/Random)
 • /help — Help / commands
 `;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
@@ -2345,6 +2348,7 @@ bot.callbackQuery("menu_help", async (ctx) => {
 
 📥 *Downloaders*
 • /yt <url>
+• /imggen <prompt>
 • /dl <url>
 `;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
@@ -2915,7 +2919,7 @@ bot.command('igdl', (ctx) => guardedImageDownloader(ctx, 'ig', 'Instagram'));
 bot.command('pindl', (ctx) => guardedImageDownloader(ctx, 'pin', 'Pinterest'));
 bot.command('twtdl', (ctx) => guardedImageDownloader(ctx, 'tw', 'Twitter/X'));
 // ===============================
-// NEW (v8): AI + Spotify + YouTube
+// NEW (v9): AI + Spotify + YouTube
 // ===============================
 bot.command('ai', async (ctx) => {
   const user = getOrCreateUser(ctx);
@@ -4628,7 +4632,7 @@ bot.command('tempmail', async (ctx) => {
       const s = await ensureSession(ctx);
 
       const msg =
-`📨 *TempMail v8* (Inbox Enabled)
+`📨 *TempMail v9* (Inbox Enabled)
 
 ✅ *Your Temp Email:*
 \`${s.address}\`
@@ -5004,6 +5008,7 @@ bot.command('help', async (ctx) => {
 
 🤖 AI & Media:
 • /ai <text> - GPT-5 text AI
+• /imggen <prompt> - AI image generator
 • /spotify <url> - Spotify track download
 • /yt <url> - YouTube downloader
 
@@ -5059,6 +5064,7 @@ bot.command('help', async (ctx) => {
 • /pincode 400001
 • /postoffice Delhi
 • /ifsc SBIN0001234
+• /imggen spiderman
 • /ig instagram
 • /igreels indiangamedevv
 • /pan ABCDE1234F
