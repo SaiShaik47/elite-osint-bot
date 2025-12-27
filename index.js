@@ -2202,6 +2202,23 @@ async function handleSpotifySearch(ctx) {
 
   await sendFormattedMessage(ctx, '🔎 Searching Spotify tracks...');
 
+  const msToMinSec = (ms) => {
+    const n = Number(ms);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    const totalSec = Math.floor(n / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  const pick = (t, keys, fallback = '') => {
+    for (const k of keys) {
+      const v = t?.[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return fallback;
+  };
+
   try {
     const api = `https://flip-apiakib.vercel.app/spotify/search?q=${encodeURIComponent(q)}`;
     const res = await axiosGetWithRetry(api, { timeout: 35000 }, 2);
@@ -2221,40 +2238,80 @@ async function handleSpotifySearch(ctx) {
 
     user.totalQueries++;
 
-    const top = items.slice(0, 8).map((t, idx) => {
-      const title = t?.title || t?.name || `Track ${idx + 1}`;
+    // Send results one-by-one (top 8)
+    const top = items.slice(0, 8);
+
+    for (let i = 0; i < top.length; i++) {
+      const t = top[i] || {};
+
+      const title = pick(t, ['title', 'name'], `Track ${i + 1}`);
       const artist =
-        t?.artist ||
-        t?.artists?.[0]?.name ||
+        pick(t, ['artist'], '') ||
         (Array.isArray(t?.artists) ? t.artists.map(a => a?.name).filter(Boolean).join(', ') : '') ||
+        t?.artists?.[0]?.name ||
         '';
-      const link =
-        t?.url ||
-        t?.link ||
-        t?.spotify_url ||
+      const album =
+        pick(t, ['album'], '') ||
+        t?.album?.name ||
+        '';
+      const release =
+        pick(t, ['release_date', 'releaseDate'], '') ||
+        t?.album?.release_date ||
+        '';
+      const duration =
+        pick(t, ['duration'], '') ||
+        msToMinSec(t?.duration_ms || t?.durationMs || t?.duration_ms) ||
+        '';
+      const preview =
+        pick(t, ['preview_url', 'previewUrl'], '') ||
+        t?.preview_url ||
+        '';
+      const trackUrl =
+        pick(t, ['track_url', 'trackUrl', 'url', 'link', 'spotify_url'], '') ||
         t?.external_urls?.spotify ||
-        t?.trackUrl ||
         '';
-      return { title, artist, link };
-    });
+      const thumb =
+        pick(t, ['thumbnail', 'image', 'cover'], '') ||
+        t?.album?.images?.[0]?.url ||
+        '';
 
-    const lines = top.map((t, i) => {
-      const name = escapeMd(`${i + 1}. ${t.title}${t.artist ? ` — ${t.artist}` : ''}`);
-      const lnk = isHttpUrl(t.link) ? t.link : '';
-      return lnk ? `${name}\n${lnk}` : name;
-    });
+      const lines = [];
+      lines.push(`🎵 *${escapeMd(String(title))}*`);
+      if (artist) lines.push(`👤 *Artist:* ${escapeMd(String(artist))}`);
+      if (album) lines.push(`💽 *Album:* ${escapeMd(String(album))}`);
+      if (release) lines.push(`📅 *Release:* ${escapeMd(String(release))}`);
+      if (duration) lines.push(`⏱ *Duration:* ${escapeMd(String(duration))}`);
+      lines.push(`🔗 *Track:* ${isHttpUrl(trackUrl) ? trackUrl : 'N/A'}`);
+      lines.push(`🎧 *Preview:* ${isHttpUrl(preview) ? preview : 'No preview available'}`);
 
-    return sendLongOrFile(
-      ctx,
-      `🎵 *Spotify Search Results*\n\n${lines.join('\n\n')}\n\nTip: Copy a track URL and use:\n/spotify <track url>`,
-      'spotify_search'
-    );
+      const msg = lines.join('\n');
+
+      if (isHttpUrl(thumb)) {
+        try {
+          await ctx.replyWithPhoto(thumb, {
+            caption: msg,
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+          });
+        } catch (e) {
+          await sendFormattedMessage(ctx, msg);
+        }
+      } else {
+        await sendFormattedMessage(ctx, msg);
+      }
+
+      // small delay to avoid flood
+      await sleep(250);
+    }
+
+    return;
   } catch (e) {
     console.error('spsearch error:', e?.message || e);
     user.credits += 1;
     return sendFormattedMessage(ctx, '❌ Spotify search failed. Try again later.');
   }
 }
+
 
 bot.command('spsearch', handleSpotifySearch);
 bot.command('spotifysearch', handleSpotifySearch);
