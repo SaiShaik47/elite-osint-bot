@@ -1642,6 +1642,8 @@ bot.callbackQuery("menu_help", async (ctx) => {
 • /spsearch <query> — Search tracks (shows track + preview)
 
 🧠 *Prompts Library*
+• /prompts [page] [category] — Browse prompts (example: /prompts 2 Nano Banana Pro)
+• /promptcats — List categories
 
 🤖 *AI*
 • /ai <text>
@@ -2194,15 +2196,8 @@ bot.command('ai', async (ctx) => {
 
     user.totalQueries++;
 
-    // Reply as HTML and convert simple markdown **bold** into <b>bold</b>
-    const raw = String(answer);
-    const escaped = escapeHtml(raw);
-
-    // Convert markdown-style bold ( **text** ) into HTML bold safely (after escaping)
-    const withBold = escaped.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-
-    return ctx.reply(withBold, { parse_mode: 'HTML', disable_web_page_preview: true });
-
+    // Reply only the text (no JSON)
+    return ctx.reply(String(answer));
   } catch (e) {
     console.error('ai error:', e?.message || e);
     user.credits += 1;
@@ -2437,8 +2432,510 @@ bot.command('spotify', async (ctx) => {
 });
 
 
+// ===============================
+// FLIP PROMPT LIBRARY (PROMPTS + CATEGORIES)
+// Base: https://flip-prompt.vercel.app
+// ===============================
+const FLIP_PROMPT_BASE = 'https://flip-prompt.vercel.app';
+const FLIP_PROMPT_PROMPTS = `${FLIP_PROMPT_BASE}/api/prompts`;
+const FLIP_PROMPT_CATEGORIES = `${FLIP_PROMPT_BASE}/api/categories`;
+
+async function fetchFlipPrompts({ page = 1, category = null } = {}) {
+  const params = new URLSearchParams();
+  if (page) params.set('page', String(page));
+  if (category) params.set('category', String(category));
+
+  const url = `${FLIP_PROMPT_PROMPTS}?${params.toString()}`;
+  const res = await axiosGetWithRetry(url, { timeout: 25000, responseType: 'json' }, 3);
+  return { url, data: res.data };
+}
+
+async function fetchFlipCategories() {
+  const res = await axiosGetWithRetry(FLIP_PROMPT_CATEGORIES, { timeout: 25000, responseType: 'json' }, 3);
+  return res.data;
+}
+
+async function sendLongPlain(ctx, text, filenamePrefix = 'output') {
+  const MAX_LEN = 3800;
+  const plain = String(text || '');
+  if (plain.length <= MAX_LEN) {
+    return ctx.reply(plain, { disable_web_page_preview: true });
+  }
+  const safePrefix = (filenamePrefix || 'output').toString().replace(/[^a-zA-Z0-9_\-]+/g, '_').slice(0, 40);
+  const fileName = `${safePrefix}_${Date.now()}.txt`;
+  const buffer = Buffer.from(plain, 'utf-8');
+  return ctx.replyWithDocument({ source: buffer, filename: fileName }, { caption: '📄 Output was too long, so I sent it as a .txt file.' });
+}
+
+// /prompts [page] [category]
+// Examples:
+// /prompts
+// /prompts 2
+// /prompts Nano Banana Pro
+// /prompts 3 Nano Banana Pro
+// /prompts page=3 category=Nano Banana Pro
+bot.command('prompts', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  const raw = getCommandArgs(ctx);
+  let page = 1;
+  let category = null;
+
+  try {
+    const s = String(raw || '').trim();
+
+    if (s) {
+      // key=value style
+      const pageMatch = s.match(/(?:^|\s|&)page\s*=\s*(\d{1,3})/i);
+      const catMatch = s.match(/(?:^|\s|&)category\s*=\s*(.+)$/i);
+
+      if (pageMatch) page = Math.max(1, parseInt(pageMatch[1], 10) || 1);
+
+      if (catMatch && catMatch[1]) {
+        category = catMatch[1].trim();
+      } else {
+        // token style: [page] [category...]
+        const parts = s.split(/\s+/).filter(Boolean);
+        if (parts.length) {
+          if (/^\d{1,3}$/.test(parts[0])) {
+            page = Math.max(1, parseInt(parts[0], 10) || 1);
+            category = parts.slice(1).join(' ').trim() || null;
+          } else {
+            category = parts.join(' ').trim() || null;
+          }
+        }
+      }
+    }
+
+    await ctx.reply('📚 Fetching prompts…');
+
+    const { url, data } = await fetchFlipPrompts({ page, category });
+    const arr =
+      (Array.isArray(data) ? data :
+      Array.isArray(data?.prompts) ? data.prompts :
+      Array.isArray(data?.data) ? data.data :
+      Array.isArray(data?.results) ? data.results :
+      Array.isArray(data?.items) ? data.items : []);
+
+    if (!arr.length) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ No prompts found for that page/category.');
+    }
+
+    const header =
+      `🧠 Flip Prompt Library\n` +
+      `📄 Page: ${page}\n` +
+      (category ? `🏷️ Category: ${category}\n` : '') +
+      `🔗 Source: ${url}\n\n`;
+
+    const take = arr.slice(0, 8);
+    const lines = [];
+    for (let i = 0; i < take.length; i++) {
+      const it = take[i] || {};
+      const title = it.title || it.name || `Prompt ${i + 1}`;
+      const cat = it.category || it.cat || '';
+      const body = it.prompt || it.text || it.content || it.value || '';
+      lines.push(
+        `#${i + 1} ${title}${cat ? ` [${cat}]` : ''}\n` +
+        `${body}`.trim()
+      );
+    }
+
+    user.totalQueries++;
+    return sendLongPlain(ctx, header + lines.join('\n\n— — —\n\n'), 'prompts');
+
+  } catch (e) {
+    console.error('prompts error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ Failed to fetch prompts. Try again later.');
+  }
+});
+
+// /promptcats — list categories
+bot.command('promptcats', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  try {
+    await ctx.reply('🏷️ Fetching categories…');
+    const data = await fetchFlipCategories();
+    const cats =
+      (Array.isArray(data) ? data :
+      Array.isArray(data?.categories) ? data.categories :
+      Array.isArray(data?.data) ? data.data :
+      Array.isArray(data?.results) ? data.results : []);
+
+    if (!cats.length) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ No categories found.');
+    }
+
+    const lines = cats.slice(0, 60).map((c, i) => `• ${typeof c === 'string' ? c : (c?.name || c?.title || JSON.stringify(c))}`);
+    user.totalQueries++;
+    return sendLongPlain(ctx, `🏷️ Categories (${cats.length})\n\n${lines.join('\n')}`, 'prompt_categories');
+
+  } catch (e) {
+    console.error('promptcats error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ Failed to fetch categories. Try again later.');
+  }
+});
+
+bot.command('yt', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  const input = getCommandArgs(ctx);
+  if (!input) {
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '🎬 Usage: /yt <youtube url>');
+  }
+
+  // Accept either a YouTube URL or a direct ytcontent process URL.
+  const raw = input.trim();
+
+  // Extract video id from common YouTube links
+  function extractYouTubeId(u) {
+    try {
+      const s = String(u || '');
+      const m1 = s.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
+      if (m1) return m1[1];
+      const m2 = s.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
+      if (m2) return m2[1];
+      const m3 = s.match(/\/shorts\/([a-zA-Z0-9_-]{6,})/);
+      if (m3) return m3[1];
+      const m4 = s.match(/\/embed\/([a-zA-Z0-9_-]{6,})/);
+      if (m4) return m4[1];
+    } catch (_) {}
+    return null;
+  }
+
+  // Try to pick a URL for a given quality from a list
+  function pickQuality(urls, q) {
+    const u = (urls || []).filter(isHttpUrl);
+    const s = String(q);
+    const direct = u.find(x => x.includes(s)) || null;
+    if (direct) return direct;
+
+    // some APIs use itags instead of "720p"
+    const itagMap = { '1080': ['137','299','303','399'], '720': ['22','136','298','302'], '480': ['135','244','18'] };
+    const itags = itagMap[s] || [];
+    for (const it of itags) {
+      const hit = u.find(x => new RegExp(`(?:itag|itags?|=)${it}(?:\D|$)`, 'i').test(x));
+      if (hit) return hit;
+    }
+
+    // last resort: prefer mp4/video links
+    const mp4 = u.filter(x => /\.mp4(\?|$)/i.test(x) || /mime=video/i.test(x) || /video/i.test(x));
+    return mp4[0] || u[0] || null;
+  }
+
+  await sendFormattedMessage(ctx, '🎬 Preparing quality options...');
+
+  try {
+    let urls = [];
+
+    // If user provided ytcontent process link, fetch it directly
+    if (/ytcontent\.net\/v3\/videoProcess\//i.test(raw)) {
+      const res = await axiosGetWithRetry(raw, { timeout: 45000 }, 2);
+      urls = findAllUrlsDeep(res.data || {});
+    } else {
+      // Default: use existing resolver API
+      const api = `https://flip-yt-downloader-akib.vercel.app/yt?url=${encodeURIComponent(raw)}`;
+      const res = await axiosGetWithRetry(api, { timeout: 45000 }, 2);
+      const data = res.data || {};
+      urls = findAllUrlsDeep(data);
+    }
+
+    if (!urls.length) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
+    }
+
+    const u1080 = pickQuality(urls, '1080');
+    const u720 = pickQuality(urls, '720');
+    const u480 = pickQuality(urls, '480');
+
+    if (!isHttpUrl(u1080) && !isHttpUrl(u720) && !isHttpUrl(u480)) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ YouTube download link not found from API.');
+    }
+
+    user.totalQueries++;
+
+    // ONLY response: buttons (no extra links, no video auto-send)
+    const kb = new InlineKeyboard()
+      .url('1080p', isHttpUrl(u1080) ? u1080 : (isHttpUrl(u720) ? u720 : u480)).row()
+      .url('720p', isHttpUrl(u720) ? u720 : (isHttpUrl(u480) ? u480 : u1080)).row()
+      .url('480p', isHttpUrl(u480) ? u480 : (isHttpUrl(u720) ? u720 : u1080));
+
+    return ctx.reply('🎬 Choose Quality:', { reply_markup: kb });
+  } catch (e) {
+    console.error('yt error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ YouTube download failed. Try again later.');
+  }
+});
 
 
+// OSINT Commands
+bot.command('ip', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const ip = ctx.match || 'self';
+  await sendFormattedMessage(ctx, '🔍 Fetching IP intelligence...');
+
+  try {
+    const result = await getIpInfo(ip === 'self' ? undefined : ip.toString());
+    
+    if (result.success && result.data) {
+      const response = `🌐 IP Intelligence Results 🌐
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 IP information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to fetch IP information. Please check the IP address and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in ip command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while fetching IP information.\n💳 1 credit refunded');
+  }
+});
+
+bot.command('email', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const email = ctx.match;
+  if (!email) {
+    await sendFormattedMessage(ctx, '📧 Usage: /email <email address>\n\nExample: /email user@example.com');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🔍 Validating email address...');
+
+  try {
+    const result = await validateEmail(email.toString());
+    
+    if (result.success && result.data) {
+      const response = `📧 Email Validation Results 📧
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Email validation for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to validate email address. Please check the email and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in email command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while validating email address.\n💳 1 credit refunded');
+  }
+});
+
+bot.command('num', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const number = ctx.match;
+  if (!number) {
+    await sendFormattedMessage(ctx, '📱 Usage: /num <phone number>\n\nExample: /num 9389482769');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🔍 Looking up phone number...');
+
+  try {
+    const result = await getPhoneNumberInfo(number.toString());
+    
+    if (result.success && result.data) {
+      const response = `📱 Phone Number Lookup Results 📱
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Phone number information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to lookup phone number. Please check the number and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in num command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up phone number.\n💳 1 credit refunded');
+  }
+});
+
+bot.command('basicnum', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const number = ctx.match;
+  if (!number) {
+    await sendFormattedMessage(ctx, '📱 Usage: /basicnum <phone number>\n\nExample: /basicnum 919087654321');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🔍 Getting basic number information...');
+
+  try {
+    const result = await getBasicNumberInfo(number.toString());
+    
+    if (result.success && result.data) {
+      const response = `📱 Basic Number Information 📱
+
+\`\`\`json
+ ${JSON.stringify(result.data, null, 2)}
+\`\`\`
+
+💡 Basic number information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, '❌ Failed to get basic number information. Please check the number and try again.\n💳 1 credit refunded');
+    }
+  } catch (error) {
+    console.error('Error in basicnum command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while getting basic number information.\n💳 1 credit refunded');
+  }
+});
+
+// UPDATED: Pakistani Government Number Information command
+bot.command('paknum', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
+    return;
+  }
+
+  // Check credits
+  if (!deductCredits(user)) {
+    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+    return;
+  }
+
+  const number = ctx.match;
+  if (!number) {
+    await sendFormattedMessage(ctx, '📱 Usage: /paknum <Pakistani number or CNIC>\n\nExample: /paknum 03005854962\nExample: /paknum 2150952917167');
+    return;
+  }
+
+  await sendFormattedMessage(ctx, '🔍 Looking up Pakistani government number information...');
+
+  try {
+    const result = await getPakistaniGovtNumberInfo(number.toString());
+    
+    if (result.success && result.data && result.data.length > 0) {
+      // Format the results as JSON with colored formatting
+      const formattedResults = result.data.map((record, index) => ({
+        [`Record #${index + 1}`]: {
+          name: record.name || 'N/A',
+          number: record.n || 'N/A',
+          cnic: record.cnic || 'N/A',
+          address: record.address || 'N/A'
+        }
+      }));
+      
+      const response = `📱 Pakistani Government Number Information 📱
+
+🔍 Found ${result.count} record(s) for: ${number}
+
+\`\`\`json
+ ${JSON.stringify(formattedResults, null, 2)}
+\`\`\`
+
+💡 Information for educational purposes only
+• 1 credit deducted from your balance`;
+
+      await sendFormattedMessage(ctx, response);
+      user.totalQueries++;
+    } else {
+      // Refund credit on failure
+      user.credits += 1;
+      await sendFormattedMessage(ctx, `❌ ${result.error || 'No records found for the provided number or CNIC'}\n💳 1 credit refunded`);
+    }
+  } catch (error) {
+    console.error('Error in paknum command:', error);
+    // Refund credit on error
+    user.credits += 1;
+    await sendFormattedMessage(ctx, '❌ An error occurred while looking up Pakistani government number information.\n💳 1 credit refunded');
+  }
+});
 // ===============================
 // INDIA POSTAL COMMANDS
 // ===============================
