@@ -10,6 +10,14 @@ const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+
+// Extract arguments after a slash-command (works for grammy bot.command)
+function getCommandArgs(ctx) {
+  const t = ctx?.message?.text || '';
+  // remove '/cmd' and optional '@botname'
+  const s = t.replace(/^\/\w+(?:@\w+)?\s*/i, '');
+  return s.trim();
+}
 // Robust GET helper with retries + HTML-block detection
 async function axiosGetWithRetry(url, opts = {}, attempts = 3) {
   const timeout = opts.timeout ?? 25000;
@@ -2139,7 +2147,7 @@ bot.command('ai', async (ctx) => {
 
   if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
 
-  const prompt = (ctx.match || '').trim();
+  const prompt = getCommandArgs(ctx);
   if (!prompt) {
     user.credits += 1;
     return sendFormattedMessage(ctx, '🤖 Usage: /ai <your text>');
@@ -2152,19 +2160,26 @@ bot.command('ai', async (ctx) => {
     const res = await axiosGetWithRetry(url, { timeout: 30000 }, 2);
     const data = res.data || {};
 
+    // API response example:
+    // { status: true, model: 'gpt-5', text: '...' }
     const answer =
       (typeof data === 'string' ? data : null) ||
+      data.text ||
       data.response ||
       data.result ||
       data.answer ||
       data.data ||
-      JSON.stringify(data, null, 2);
+      '';
+
+    if (!String(answer).trim()) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ AI returned empty response. Try again.');
+    }
 
     user.totalQueries++;
 
-    // Keep Markdown safe
-    const safe = escapeMd(String(answer));
-    return ctx.reply(`🤖 *AI Response*\n\n${safe}`, { parse_mode: 'Markdown' });
+    // Reply only the text (no JSON)
+    return ctx.reply(String(answer));
   } catch (e) {
     console.error('ai error:', e?.message || e);
     user.credits += 1;
@@ -2178,7 +2193,7 @@ bot.command('spotify', async (ctx) => {
 
   if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
 
-  const url = (ctx.match || '').trim();
+  const url = getCommandArgs(ctx);
   if (!url) {
     user.credits += 1;
     return sendFormattedMessage(ctx, '🎵 Usage: /spotify <spotify track url>');
@@ -2221,7 +2236,7 @@ bot.command('yt', async (ctx) => {
 
   if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
 
-  const url = (ctx.match || '').trim();
+  const url = getCommandArgs(ctx);
   if (!url) {
     user.credits += 1;
     return sendFormattedMessage(ctx, '🎬 Usage: /yt <youtube url>');
