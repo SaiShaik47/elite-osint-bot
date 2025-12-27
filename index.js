@@ -1427,39 +1427,76 @@ async function getVideoInfo(url) {
 // Smart video sender with size detection
 async function sendVideoSmart(ctx, videoUrl, caption) {
   try {
-    // Get video information first
-    const videoInfo = await getVideoInfo(videoUrl);
+    // ctx may be a real grammY ctx OR a plain object (e.g., `{...ctx, chat:{id}}`)
+    // so we must not rely on prototype methods like ctx.reply / ctx.replyWithVideo.
+    const api = (ctx && ctx.api) ? ctx.api : (bot && bot.api ? bot.api : null);
+    const chatId =
+      ctx?.chat?.id ??
+      ctx?.chatId ??
+      ctx?.message?.chat?.id ??
+      ctx?.msg?.chat?.id ??
+      ctx?.callbackQuery?.message?.chat?.id ??
+      null;
+
+    if (!api || !chatId) {
+      throw new Error("sendVideoSmart: missing api/chatId");
+    }
+
+    // Get video information first (best-effort)
+    let videoInfo = { sizeMB: "Unknown", type: "Unknown" };
+    try {
+      videoInfo = await getVideoInfo(videoUrl);
+    } catch (_) {}
 
     const type = String(videoInfo.type || '').toLowerCase();
     const looksLikeGif = /(^|\W)gif($|\W)/i.test(videoUrl) || type.includes('gif');
 
-    // Create caption with info (kept short)
     const fullCaption = `${caption}\n\n📊 Size: ${videoInfo.sizeMB}MB | Type: ${videoInfo.type}`;
 
-    // If the upstream is giving a GIF (or a "GIF-like" mp4), send as DOCUMENT to prevent Telegram "GIF mode"
+    // If upstream is giving a GIF (or GIF-like mp4), send as DOCUMENT to avoid Telegram GIF mode
     if (looksLikeGif) {
-      await ctx.replyWithDocument(videoUrl, {
-        caption: `${caption}\n\n⬇️ File (sent as document to avoid GIF mode)`,
-      });
+      const opts = { caption: `${caption}\n\n⬇️ File (sent as document to avoid GIF mode)` };
+      if (typeof ctx?.replyWithDocument === "function") {
+        await ctx.replyWithDocument(videoUrl, opts);
+      } else {
+        await api.sendDocument(chatId, videoUrl, opts);
+      }
       return true;
     }
 
-    if (videoInfo.canSend) {
-      await ctx.replyWithVideo(videoUrl, {
-        caption: fullCaption,
-        supports_streaming: true
-      });
+    // Prefer video send; fallback to message with link if Telegram rejects
+    try {
+      const opts = { caption: fullCaption, supports_streaming: true };
+      if (typeof ctx?.replyWithVideo === "function") {
+        await ctx.replyWithVideo(videoUrl, opts);
+      } else {
+        await api.sendVideo(chatId, videoUrl, opts);
+      }
       return true;
+    } catch (e) {
+      // fallback to link
+      const msg = `${fullCaption}\n\n⬇️ Download Link:\n${videoUrl}`;
+      if (typeof ctx?.reply === "function") {
+        await ctx.reply(msg, { disable_web_page_preview: true });
+      } else {
+        await api.sendMessage(chatId, msg, { disable_web_page_preview: true });
+      }
+      return false;
     }
-
-    await ctx.reply(`${fullCaption}\n\n⬇️ Download Link:\n${videoUrl}`);
-    return true;
   } catch (err) {
     console.error(err);
-    await ctx.reply(`${caption}\n\n⬇️ Download Link:\n${videoUrl}`);
+    try {
+      const api = (ctx && ctx.api) ? ctx.api : (bot && bot.api ? bot.api : null);
+      const chatId = ctx?.chat?.id ?? ctx?.chatId ?? ctx?.message?.chat?.id ?? ctx?.msg?.chat?.id ?? null;
+      if (api && chatId) {
+        const msg = `${caption}\n\n⬇️ Download Link:\n${videoUrl}`;
+        await api.sendMessage(chatId, msg, { disable_web_page_preview: true });
+      }
+    } catch (_) {}
     return false;
   }
 }
+
 
 // Escape Markdown to avoid Telegram parse errors
 function escapeMd(text = "") {
