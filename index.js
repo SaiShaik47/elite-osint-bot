@@ -1584,7 +1584,7 @@ bot.callbackQuery("menu_osint", async (ctx) => {
 
 // Menu: Downloaders
 bot.callbackQuery("menu_dl", async (ctx) => {
-  const msg = `📥 *Downloaders & Media*
+    const msg = `📥 *Downloaders & Media*
 
 • /dl <url> — Universal downloader
 • /snap <url> — Snapchat downloader
@@ -1597,10 +1597,9 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /twtdl <url> — Twitter/X images
 • /ai <text> — AI chat (GPT-5)
 • /spotify <url> — Spotify track download
-• /spsearch <query> — Spotify search (track/artist/album)
+• /spsearch <query> — Spotify search
 • /yt <url> — YouTube downloader
-
-• /help — Help & commands
+• /help — Help / commands
 `;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
@@ -1625,7 +1624,7 @@ bot.callbackQuery("menu_bank", async (ctx) => {
 
 // Menu: Help
 bot.callbackQuery("menu_help", async (ctx) => {
-  const msg = `ℹ️ *Help*
+    const msg = `ℹ️ *Help*
 
 • Use /start to open the menu anytime
 • If buttons freeze, tap again (Telegram bug)
@@ -1638,11 +1637,21 @@ bot.callbackQuery("menu_help", async (ctx) => {
 • /credits — Check your balance
 • /register — Register your account
 
-📥 *New in v8*
+🎧 *Spotify*
+• /spotify <url> — Download track (audio)
+• /spsearch <query> — Search tracks (shows track + preview)
+
+🧠 *Prompts Library*
+• /prompts [page] [category] — Browse prompts (example: /prompts 2 Nano Banana Pro)
+• /promptcats — List categories
+
+🤖 *AI*
 • /ai <text>
-• /spotify <url>
-• /spsearch <query>
-• /yt <url>`;
+
+📥 *Downloaders*
+• /yt <url>
+• /dl <url>
+`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
@@ -2285,13 +2294,13 @@ async function handleSpotifySearch(ctx) {
         '';
 
       const lines = [];
-      lines.push(`🎵 ${String(title)}`);
-      if (artist) lines.push(`👤 Artist: ${String(artist)}`);
-      if (album) lines.push(`💽 Album: ${String(album)}`);
-      if (release) lines.push(`📅 Release: ${String(release)}`);
-      if (duration) lines.push(`⏱️ Duration: ${String(duration)}`);
-      lines.push(`🔗 *Track:* ${isHttpUrl(trackUrl) ? trackUrl : 'N/A'}`);
-      lines.push(`🎧 *Preview:* ${isHttpUrl(preview) ? preview : 'No preview available'}`);
+      lines.push(`🎵 ${escapeHtml(String(title))}`);
+      if (artist) lines.push(`👤 <b>Artist:</b> ${escapeHtml(String(artist))}`);
+      if (album) lines.push(`💽 <b>Album:</b> ${escapeHtml(String(album))}`);
+      if (release) lines.push(`📅 <b>Release:</b> ${escapeHtml(String(release))}`);
+      if (duration) lines.push(`⏱️ <b>Duration:</b> ${escapeHtml(String(duration))}`);
+      lines.push(`🔗 <b>Track:</b> ${escapeHtml(isHttpUrl(trackUrl) ? trackUrl : 'N/A')}`);
+      lines.push(`🎧 <b>Preview:</b> ${escapeHtml(isHttpUrl(preview) ? preview : 'No preview available')}`);
 
       const msg = lines.join('\n');
 
@@ -2299,16 +2308,17 @@ async function handleSpotifySearch(ctx) {
         try {
           await ctx.replyWithPhoto(thumb, {
             caption: msg,
+            parse_mode: 'HTML',
             disable_web_page_preview: true
           });
         } catch (e) {
-          await ctx.reply(msg, { disable_web_page_preview: true });
+          await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true });
         }
       } else {
-        await ctx.reply(msg, { disable_web_page_preview: true });
+        await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true });
       }
 
-      // small delay to avoid flood
+// small delay to avoid flood
       await sleep(250);
     }
 
@@ -2421,6 +2431,158 @@ bot.command('spotify', async (ctx) => {
   }
 });
 
+
+// ===============================
+// FLIP PROMPT LIBRARY (PROMPTS + CATEGORIES)
+// Base: https://flip-prompt.vercel.app
+// ===============================
+const FLIP_PROMPT_BASE = 'https://flip-prompt.vercel.app';
+const FLIP_PROMPT_PROMPTS = `${FLIP_PROMPT_BASE}/api/prompts`;
+const FLIP_PROMPT_CATEGORIES = `${FLIP_PROMPT_BASE}/api/categories`;
+
+async function fetchFlipPrompts({ page = 1, category = null } = {}) {
+  const params = new URLSearchParams();
+  if (page) params.set('page', String(page));
+  if (category) params.set('category', String(category));
+
+  const url = `${FLIP_PROMPT_PROMPTS}?${params.toString()}`;
+  const res = await axiosGetWithRetry(url, { timeout: 25000, responseType: 'json' }, 3);
+  return { url, data: res.data };
+}
+
+async function fetchFlipCategories() {
+  const res = await axiosGetWithRetry(FLIP_PROMPT_CATEGORIES, { timeout: 25000, responseType: 'json' }, 3);
+  return res.data;
+}
+
+async function sendLongPlain(ctx, text, filenamePrefix = 'output') {
+  const MAX_LEN = 3800;
+  const plain = String(text || '');
+  if (plain.length <= MAX_LEN) {
+    return ctx.reply(plain, { disable_web_page_preview: true });
+  }
+  const safePrefix = (filenamePrefix || 'output').toString().replace(/[^a-zA-Z0-9_\-]+/g, '_').slice(0, 40);
+  const fileName = `${safePrefix}_${Date.now()}.txt`;
+  const buffer = Buffer.from(plain, 'utf-8');
+  return ctx.replyWithDocument({ source: buffer, filename: fileName }, { caption: '📄 Output was too long, so I sent it as a .txt file.' });
+}
+
+// /prompts [page] [category]
+// Examples:
+// /prompts
+// /prompts 2
+// /prompts Nano Banana Pro
+// /prompts 3 Nano Banana Pro
+// /prompts page=3 category=Nano Banana Pro
+bot.command('prompts', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  const raw = getCommandArgs(ctx);
+  let page = 1;
+  let category = null;
+
+  try {
+    const s = String(raw || '').trim();
+
+    if (s) {
+      // key=value style
+      const pageMatch = s.match(/(?:^|\s|&)page\s*=\s*(\d{1,3})/i);
+      const catMatch = s.match(/(?:^|\s|&)category\s*=\s*(.+)$/i);
+
+      if (pageMatch) page = Math.max(1, parseInt(pageMatch[1], 10) || 1);
+
+      if (catMatch && catMatch[1]) {
+        category = catMatch[1].trim();
+      } else {
+        // token style: [page] [category...]
+        const parts = s.split(/\s+/).filter(Boolean);
+        if (parts.length) {
+          if (/^\d{1,3}$/.test(parts[0])) {
+            page = Math.max(1, parseInt(parts[0], 10) || 1);
+            category = parts.slice(1).join(' ').trim() || null;
+          } else {
+            category = parts.join(' ').trim() || null;
+          }
+        }
+      }
+    }
+
+    await ctx.reply('📚 Fetching prompts…');
+
+    const { url, data } = await fetchFlipPrompts({ page, category });
+    const arr =
+      (Array.isArray(data) ? data :
+      Array.isArray(data?.prompts) ? data.prompts :
+      Array.isArray(data?.data) ? data.data :
+      Array.isArray(data?.results) ? data.results :
+      Array.isArray(data?.items) ? data.items : []);
+
+    if (!arr.length) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ No prompts found for that page/category.');
+    }
+
+    const header =
+      `🧠 Flip Prompt Library\n` +
+      `📄 Page: ${page}\n` +
+      (category ? `🏷️ Category: ${category}\n` : '') +
+      `🔗 Source: ${url}\n\n`;
+
+    const take = arr.slice(0, 8);
+    const lines = [];
+    for (let i = 0; i < take.length; i++) {
+      const it = take[i] || {};
+      const title = it.title || it.name || `Prompt ${i + 1}`;
+      const cat = it.category || it.cat || '';
+      const body = it.prompt || it.text || it.content || it.value || '';
+      lines.push(
+        `#${i + 1} ${title}${cat ? ` [${cat}]` : ''}\n` +
+        `${body}`.trim()
+      );
+    }
+
+    user.totalQueries++;
+    return sendLongPlain(ctx, header + lines.join('\n\n— — —\n\n'), 'prompts');
+
+  } catch (e) {
+    console.error('prompts error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ Failed to fetch prompts. Try again later.');
+  }
+});
+
+// /promptcats — list categories
+bot.command('promptcats', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) return sendFormattedMessage(ctx, '❌ You need approval to use this command.');
+  if (!deductCredits(user)) return sendFormattedMessage(ctx, '❌ Insufficient credits!');
+
+  try {
+    await ctx.reply('🏷️ Fetching categories…');
+    const data = await fetchFlipCategories();
+    const cats =
+      (Array.isArray(data) ? data :
+      Array.isArray(data?.categories) ? data.categories :
+      Array.isArray(data?.data) ? data.data :
+      Array.isArray(data?.results) ? data.results : []);
+
+    if (!cats.length) {
+      user.credits += 1;
+      return sendFormattedMessage(ctx, '❌ No categories found.');
+    }
+
+    const lines = cats.slice(0, 60).map((c, i) => `• ${typeof c === 'string' ? c : (c?.name || c?.title || JSON.stringify(c))}`);
+    user.totalQueries++;
+    return sendLongPlain(ctx, `🏷️ Categories (${cats.length})\n\n${lines.join('\n')}`, 'prompt_categories');
+
+  } catch (e) {
+    console.error('promptcats error:', e?.message || e);
+    user.credits += 1;
+    return sendFormattedMessage(ctx, '❌ Failed to fetch categories. Try again later.');
+  }
+});
 
 bot.command('yt', async (ctx) => {
   const user = getOrCreateUser(ctx);
