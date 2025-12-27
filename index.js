@@ -2285,7 +2285,7 @@ async function sendApprovedWelcome(ctx, user) {
 🤖 *Bot Info*
 • Name: *${escapeMd(botName)}*
 • Status: ✅ Online
-• Version: \`v8\`
+• Version: ${BOT_VERSION}
 
 💳 *Credits:* *${user.credits}* 🪙
 ${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
