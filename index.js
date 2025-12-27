@@ -85,24 +85,28 @@ async function pollYtcontentProcess(processUrl, opts = {}) {
   return { ok: false, data: last, fileUrl: last?.fileUrl || null };
 }
 
-function formatYtProcessText(apiJson, processUrl) {
-  const p = apiJson?.percent ?? '…';
+function makeProgressBar(percentStr, width = 12) {
+  const p = parseInt(String(percentStr || '').replace(/[^0-9]/g, ''), 10);
+  const pct = Number.isFinite(p) ? Math.max(0, Math.min(100, p)) : 0;
+  const filled = Math.round((pct / 100) * width);
+  return '▓'.repeat(filled) + '░'.repeat(Math.max(0, width - filled));
+}
+
+// HTML (no markdown symbols). Telegram shows real bold with <b>...</b>
+function formatYtProcessHtml(apiJson, processUrl) {
+  const percent = apiJson?.percent ?? '…';
+  const bar = makeProgressBar(percent, 14);
   const size = apiJson?.estimatedFileSize ?? (apiJson?.fileSize ? ((Number(apiJson.fileSize) / (1024*1024)).toFixed(2) + ' MB') : 'Unknown');
   const name = apiJson?.fileName ?? 'video.mp4';
   const fileUrl = apiJson?.fileUrl ?? 'In Processing...';
 
   return (
-`🎬 *YouTube 1080p Processing*
-
-• Progress: *${escapeMd(String(p))}*
-• Est. Size: *${escapeMd(String(size))}*
-• File: \`${escapeMd(String(name))}\`
-
-🔄 Process URL:
-${processUrl}
-
-⬇️ File URL:
-${fileUrl}`
+`🎬 <b>YouTube 1080p Processing</b>\n\n` +
+`<b>Progress:</b> ${escapeHtml(String(percent))}  <code>${bar}</code>\n` +
+`<b>Est. Size:</b> ${escapeHtml(String(size))}\n` +
+`<b>File:</b> <code>${escapeHtml(String(name))}</code>\n\n` +
+`<b>Process URL:</b>\n<code>${escapeHtml(String(processUrl))}</code>\n\n` +
+`<b>File URL:</b>\n<code>${escapeHtml(String(fileUrl))}</code>`
   );
 }
 
@@ -2807,7 +2811,7 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
     }
 
     // show initial status
-    try { await ctx.editMessageText(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); }
+    try { await ctx.editMessageText(formatYtProcessHtml(last, url), { parse_mode: 'HTML', disable_web_page_preview: true }); }
     catch (_) { try { await ctx.reply(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); } catch (_) {} }
 
     const intervalMs = 2500;
