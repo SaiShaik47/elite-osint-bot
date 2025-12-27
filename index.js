@@ -1581,6 +1581,7 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /igdl <url> — Instagram images (posts)
 • /pindl <url> — Pinterest images
 • /twtdl <url> — Twitter/X images
+`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
@@ -2858,6 +2859,15 @@ ${JSON.stringify(result.data, null, 2)}
 
 // ===============================
 // TEMPMAIL (MAIL.TM BACKEND) - /tempmail new|me|inbox|read <id>
+
+function tempmailInlineKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: '🔄 Refresh inbox', callback_data: 'tm_refresh' }],
+      [{ text: '📨 My tempmail', callback_data: 'tm_me' }],
+    ],
+  };
+}
 // Uses https://docs.mail.tm/ API
 // ===============================
 const MAILTM_BASE = process.env.MAILTM_BASE || 'https://api.mail.tm';
@@ -2985,7 +2995,11 @@ bot.command('tempmail', async (ctx) => {
     if (action === 'me') {
       const s = await ensureSession(ctx);
       const msg = `📨 *Your Current TempMail*\n\n\`${s.address}\`\n\nUse: /tempmail inbox`;
-      return sendFormattedMessage(ctx, msg);
+      try {
+        return await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: tempmailInlineKeyboard() });
+      } catch (_) {
+        return sendFormattedMessage(ctx, msg);
+      }
     }
 
     if (action === 'inbox') {
@@ -2993,7 +3007,12 @@ bot.command('tempmail', async (ctx) => {
       const items = await mailtmListMessages(s.token);
 
       if (!items.length) {
-        return sendFormattedMessage(ctx, `📭 Inbox is empty\n\nEmail: \`${s.address}\`\nTip: wait 10-30 seconds and run /tempmail inbox again.`);
+        const msg = `📭 *Inbox is empty*\n\nEmail: \`${s.address}\`\n\nTip: wait 10–30 seconds, then tap *Refresh inbox* or run /tempmail inbox again.`;
+        try {
+          return await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: tempmailInlineKeyboard() });
+        } catch (_) {
+          return sendFormattedMessage(ctx, msg);
+        }
       }
 
       const lines = items.slice(0, 15).map((m, i) => {
@@ -3005,7 +3024,11 @@ bot.command('tempmail', async (ctx) => {
       }).join('\n\n');
 
       const msg = `📥 *Inbox (showing up to 15)*\nEmail: \`${s.address}\`\n\n${lines}\n\nUse: /tempmail read <id>`;
-      return sendFormattedMessage(ctx, msg);
+      try {
+        return await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: tempmailInlineKeyboard() });
+      } catch (_) {
+        return sendFormattedMessage(ctx, msg);
+      }
     }
 
     if (action === 'read') {
@@ -3034,6 +3057,47 @@ bot.command('tempmail', async (ctx) => {
     // If action was 'new' we already deducted 1 credit; refund on failure
     if ((action === 'new') && user && !user.isPremium) user.credits += 1;
     return sendFormattedMessage(ctx, `❌ TempMail failed. Try again.\n\nTip: /tempmail new`);
+  }
+});
+
+// TempMail inline buttons
+bot.callbackQuery('tm_me', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return safeEditOrReply(ctx, '❌ You need to be approved to use TempMail. Use /register first.', backToMenuKeyboard());
+  }
+  try {
+    const s = await ensureSession(ctx);
+    const msg = `📨 *Your Current TempMail*\n\n\`${s.address}\`\n\nUse: /tempmail inbox`;
+    return safeEditOrReply(ctx, msg, tempmailInlineKeyboard());
+  } catch (e) {
+    return safeEditOrReply(ctx, '❌ TempMail not ready. Run /tempmail new first.', tempmailInlineKeyboard());
+  }
+});
+
+bot.callbackQuery('tm_refresh', async (ctx) => {
+  const user = getOrCreateUser(ctx);
+  if (!user || !user.isApproved) {
+    return safeEditOrReply(ctx, '❌ You need to be approved to use TempMail. Use /register first.', backToMenuKeyboard());
+  }
+  try {
+    const s = await ensureSession(ctx);
+    const items = await mailtmListMessages(s.token);
+    if (!items.length) {
+      const msg = `📭 *Inbox is empty*\n\nEmail: \`${s.address}\`\n\nTip: wait 10–30 seconds, then tap *Refresh inbox* again.`;
+      return safeEditOrReply(ctx, msg, tempmailInlineKeyboard());
+    }
+    const lines = items.slice(0, 15).map((m, i) => {
+      const from = m?.from?.address || m?.from?.name || 'Unknown';
+      const subject = m?.subject || '(no subject)';
+      const id = m?.id || '';
+      const seen = m?.seen ? '✅' : '🆕';
+      return `${seen} *${i + 1}.* ${escapeMd(subject)}\n   From: ${escapeMd(from)}\n   ID: \`${escapeMd(id)}\``;
+    }).join('\n\n');
+    const msg = `📥 *Inbox (showing up to 15)*\nEmail: \`${s.address}\`\n\n${lines}\n\nUse: /tempmail read <id>`;
+    return safeEditOrReply(ctx, msg, tempmailInlineKeyboard());
+  } catch (e) {
+    return safeEditOrReply(ctx, '❌ Failed to refresh inbox. Try /tempmail inbox or /tempmail new.', tempmailInlineKeyboard());
   }
 });
 bot.command('vehicle', async (ctx) => {
