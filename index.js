@@ -890,27 +890,59 @@ function extractImageUrls(payload) {
   return [...new Set(urls)];
 }
 
-async function sendImagesAsAlbum(ctx, urls, caption) {
+function rankHdUrl(u) {
+  const s = String(u || '').toLowerCase();
+  let score = 0;
+  // Prefer obvious HD/original markers
+  if (s.includes('original')) score += 50;
+  if (s.includes('orig')) score += 20;
+  if (s.includes('hd')) score += 15;
+  if (s.includes('1080')) score += 12;
+  if (s.includes('1440') || s.includes('2160') || s.includes('4k')) score += 14;
+  if (s.includes('large')) score += 10;
+  if (s.includes('full')) score += 8;
+  // Prefer file-ish URLs
+  if (s.match(/\.(jpg|jpeg|png|webp)(\?|$)/)) score += 6;
+  // Prefer longer URLs (often include higher-res path params)
+  score += Math.min(10, Math.floor(s.length / 60));
+  // Penalize thumbnails
+  if (s.includes('thumb') || s.includes('thumbnail') || s.includes('small') || s.includes('150x') || s.includes('320')) score -= 20;
+  return score;
+}
+
+function chooseBestImageUrls(urls) {
   const clean = (urls || []).filter(u => typeof u === 'string' && /^https?:\/\//i.test(u));
-  if (!clean.length) return false;
+  const uniq = [...new Set(clean)];
+  return uniq.sort((a, b) => rankHdUrl(b) - rankHdUrl(a));
+}
 
-  // Telegram media groups max 10 items
-  const batch = clean.slice(0, 10);
-  const media = batch.map((u, i) => ({
-    type: 'photo',
-    media: u,
-    ...(i === 0 && caption ? { caption } : {})
-  }));
+// Send as DOCUMENTS to preserve full quality (Telegram compresses photos)
+async function sendImagesAsAlbum(ctx, urls, caption) {
+  const best = chooseBestImageUrls(urls);
+  if (!best.length) return false;
 
-  try {
-    await ctx.replyWithMediaGroup(media);
-    return true;
-  } catch (e) {
-    // fallback: send links
-    const msg = `${caption || '🖼️ Images'}\n\n${batch.join('\n')}`;
-    await sendLongOrFile(ctx, msg, 'images');
-    return true;
+  // Telegram media groups max 10; documents don't support media groups reliably across clients.
+  const batch = best.slice(0, 10);
+
+  // First, send caption message (no crop)
+  if (caption) {
+    try { await ctx.reply(caption); } catch (_) {}
   }
+
+  for (let i = 0; i < batch.length; i++) {
+    const u = batch[i];
+    try {
+      await ctx.replyWithDocument(u, {
+        // keep captions short on docs to avoid parse issues
+        caption: i === 0 && !caption ? '📎 HD Image' : undefined,
+      });
+      await sleep(400);
+    } catch (e) {
+      // fallback: send link
+      try { await ctx.reply(`⬇️ ${u}`); } catch (_) {}
+    }
+  }
+  return true;
 }
 
 async function tobiDownloadImages(kind, url) {
@@ -979,25 +1011,35 @@ async function sendVideoSmart(ctx, videoUrl, caption) {
   try {
     // Get video information first
     const videoInfo = await getVideoInfo(videoUrl);
-    
-    // Create caption with video info
+
+    const type = String(videoInfo.type || '').toLowerCase();
+    const looksLikeGif = /(^|\W)gif($|\W)/i.test(videoUrl) || type.includes('gif');
+
+    // Create caption with info (kept short)
     const fullCaption = `${caption}\n\n📊 Size: ${videoInfo.sizeMB}MB | Type: ${videoInfo.type}`;
-    
+
+    // If the upstream is giving a GIF (or a "GIF-like" mp4), send as DOCUMENT to prevent Telegram "GIF mode"
+    if (looksLikeGif) {
+      await ctx.replyWithDocument(videoUrl, {
+        caption: `${caption}\n\n⬇️ File (sent as document to avoid GIF mode)`,
+      });
+      return true;
+    }
+
     if (videoInfo.canSend) {
       await ctx.replyWithVideo(videoUrl, {
         caption: fullCaption,
         supports_streaming: true
       });
-    } else {
-      await ctx.reply(
-        `${fullCaption}\n\n⬇️ Download Link:\n${videoUrl}`
-      );
+      return true;
     }
+
+    await ctx.reply(`${fullCaption}\n\n⬇️ Download Link:\n${videoUrl}`);
+    return true;
   } catch (err) {
     console.error(err);
-    await ctx.reply(
-      `${caption}\n\n⬇️ Download Link:\n${videoUrl}`
-    );
+    await ctx.reply(`${caption}\n\n⬇️ Download Link:\n${videoUrl}`);
+    return false;
   }
 }
 
@@ -1419,6 +1461,38 @@ async function safeEditOrReply(ctx, text, keyboard) {
   }
 }
 
+
+async function sendApprovedWelcome(ctx, user) {
+  const u = ctx.from || {};
+  let botMe = null;
+  try { botMe = await ctx.api.getMe(); } catch (_) {}
+
+  const botName = botMe?.first_name || "OSINT Bot";
+  const botUser = botMe?.username ? `@${botMe.username}` : "";
+  const displayName = [u.first_name, u.last_name].filter(Boolean).join(" ") || "User";
+  const uname = u.username ? `@${u.username}` : "—";
+  const lang = u.language_code || "—";
+
+  const msg =
+`✨ *Welcome, ${escapeMd(displayName)}!*
+
+👤 *Your Info*
+• ID: \`${escapeMd(String(u.id))}\`
+• Username: ${escapeMd(uname)}
+• Language: \`${escapeMd(String(lang))}\`
+
+🤖 *Bot Info*
+• Name: *${escapeMd(botName)}*
+• Status: ✅ Online
+• Version: \`v7\`
+
+💳 *Credits:* *${user.credits}* 🪙
+${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
+
+Choose a category:`;
+
+  return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: mainMenuKeyboard(ctx.from.id) });
+}
 bot.command('start', async (ctx) => {
   const user = getOrCreateUser(ctx);
 
@@ -1452,25 +1526,7 @@ To use the bot:
     return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: keyboard });
   }
 
-  const msg =
-`✨ *Welcome back, ${escapeMd(displayName)}!*
-
-👤 *Your Info*
-• ID: \`${escapeMd(String(u.id))}\`
-• Username: ${escapeMd(uname)}
-• Language: \`${escapeMd(String(lang))}\`
-
-🤖 *Bot Info*
-• Name: *${escapeMd(botName)}*
-• Status: ✅ Online
-• Version: \`v6\`
-
-💳 *Credits:* *${user.credits}* 🪙
-${user.isPremium ? "💎 Premium: ✅" : "💎 Premium: 🔒"}
-
-Choose a category:`;
-
-  return ctx.reply(msg, { parse_mode: "Markdown", reply_markup: mainMenuKeyboard(ctx.from.id) });
+  return sendApprovedWelcome(ctx, user);
 });
 
 // Menu: Home
@@ -1525,7 +1581,6 @@ bot.callbackQuery("menu_dl", async (ctx) => {
 • /igdl <url> — Instagram images (posts)
 • /pindl <url> — Pinterest images
 • /twtdl <url> — Twitter/X images
-• /thumb <url> — YouTube thumbnail (image)`;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
 });
 
@@ -1588,6 +1643,9 @@ bot.command('register', async (ctx) => {
     '🎉 Registration successful!\n' +
     '✅ Your account is automatically approved.'
   );
+
+  // Auto-send main menu (no need to run /start again)
+  await sendApprovedWelcome(ctx, user);
 
   // 🔔 Admin notification ONLY (no approval needed)
   const name = ctx.from.username
@@ -2496,35 +2554,6 @@ bot.command('ifsc', async (ctx) => {
 // ===============================
 // YOUTUBE THUMBNAIL (DIRECT IMAGE)
 // ===============================
-bot.command('thumb', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
-  }
-
-  if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
-    return;
-  }
-
-  const ytUrl = (ctx.match || '').toString().trim();
-  if (!ytUrl) {
-    await sendFormattedMessage(ctx, '🖼️ Usage: /thumb <YouTube link>\n\nExample: /thumb https://youtu.be/8of5w7RgcTc');
-    return;
-  }
-
-  await sendFormattedMessage(ctx, '🖼️ Fetching thumbnail...');
-
-  try {
-    await sendYouTubeThumb(ctx, ytUrl);
-    user.totalQueries++;
-  } catch (error) {
-    console.error('Error in thumb command:', error);
-    user.credits += 1;
-    await sendFormattedMessage(ctx, '❌ Failed to fetch thumbnail.\n💳 1 credit refunded');
-  }
-});
 
 
 bot.command('ig', async (ctx) => {
@@ -2825,46 +2854,188 @@ ${JSON.stringify(result.data, null, 2)}
   }
 });
 
+
+
+// ===============================
+// TEMPMAIL (MAIL.TM BACKEND) - /tempmail new|me|inbox|read <id>
+// Uses https://docs.mail.tm/ API
+// ===============================
+const MAILTM_BASE = process.env.MAILTM_BASE || 'https://api.mail.tm';
+const tempMailSessions = new Map(); // telegramId -> { address, password, token, accountId, createdAt }
+
+function randString(n = 10) {
+  return crypto.randomBytes(Math.ceil(n)).toString('hex').slice(0, n);
+}
+
+async function mailtmGetDomain() {
+  const r = await axiosGetWithRetry(`${MAILTM_BASE}/domains?page=1`, { timeout: 25000 }, 2);
+  const list = r.data?.['hydra:member'] || r.data?.member || r.data?.domains || [];
+  const domain = list?.[0]?.domain;
+  if (!domain) throw new Error('No mail.tm domains available');
+  return domain;
+}
+
+async function mailtmCreateAccount(address, password) {
+  // POST /accounts
+  const res = await axios.post(`${MAILTM_BASE}/accounts`, { address, password }, {
+    timeout: 25000,
+    headers: { 'content-type': 'application/json', 'user-agent': DEFAULT_UA },
+    validateStatus: () => true
+  });
+
+  if (res.status >= 200 && res.status < 300) return res.data;
+
+  // If exists already, just continue (some providers reuse)
+  const msg = JSON.stringify(res.data || {});
+  if (res.status === 422 && msg.toLowerCase().includes('address')) {
+    return { id: null, address };
+  }
+  throw new Error(`mail.tm account create failed: HTTP ${res.status}`);
+}
+
+async function mailtmGetToken(address, password) {
+  const res = await axios.post(`${MAILTM_BASE}/token`, { address, password }, {
+    timeout: 25000,
+    headers: { 'content-type': 'application/json', 'user-agent': DEFAULT_UA },
+    validateStatus: () => true
+  });
+  if (res.status >= 200 && res.status < 300 && res.data?.token) return res.data.token;
+  throw new Error(`mail.tm token failed: HTTP ${res.status}`);
+}
+
+async function mailtmListMessages(token) {
+  const r = await axiosGetWithRetry(`${MAILTM_BASE}/messages?page=1`, {
+    timeout: 25000,
+    headers: { Authorization: `Bearer ${token}` }
+  }, 2);
+  return r.data?.['hydra:member'] || [];
+}
+
+async function mailtmReadMessage(token, id) {
+  const r = await axiosGetWithRetry(`${MAILTM_BASE}/messages/${encodeURIComponent(id)}`, {
+    timeout: 25000,
+    headers: { Authorization: `Bearer ${token}` }
+  }, 2);
+  return r.data;
+}
+
+function getSession(telegramId) {
+  return tempMailSessions.get(String(telegramId)) || null;
+}
+
+async function ensureSession(ctx) {
+  const telegramId = String(ctx.from?.id || '');
+  let s = getSession(telegramId);
+  if (s?.token) return s;
+
+  // No session -> create one
+  const domain = await mailtmGetDomain();
+  const password = `P@${randString(12)}`;
+  const address = `${randString(10)}@${domain}`;
+
+  const acct = await mailtmCreateAccount(address, password);
+  const token = await mailtmGetToken(address, password);
+
+  s = { address, password, token, accountId: acct?.id || null, createdAt: Date.now() };
+  tempMailSessions.set(telegramId, s);
+  return s;
+}
+
 bot.command('tempmail', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
+    return sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
   }
 
-  if (!deductCredits(user)) {
-    await sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
-    return;
-  }
-
-  await sendFormattedMessage(ctx, '📨 Generating temp email...');
+  const args = String(ctx.match || '').trim();
+  const [sub, ...rest] = args.split(/\s+/).filter(Boolean);
+  const action = (sub || 'new').toLowerCase();
 
   try {
-    const result = await getTempMailStatus();
-    if (result.success && result.data) {
-      const response = `📨 TempMail API 📧
+    if (action === 'new') {
+      // 1 credit for creating/refreshing mailbox
+      if (!deductCredits(user)) {
+        return sendFormattedMessage(ctx, '❌ Insufficient credits! You need at least 1 credit to use this command.\n💳 Check your balance with /credits');
+      }
 
-\`\`\`json
-${JSON.stringify(result.data, null, 2)}
-\`\`\`
+      // Force refresh session
+      tempMailSessions.delete(String(ctx.from.id));
+      const s = await ensureSession(ctx);
 
-✅ Use the *generated_email* (or *quick_email*) for signups.
-⚠️ This API only exposes generation/status at the root endpoint (no inbox endpoints shown).
+      const msg =
+`📨 *TempMail v7* (Inbox Enabled)
 
-• 1 credit deducted from your balance`;
-      await sendFormattedMessage(ctx, response);
+✅ *Your Temp Email:*
+\`${s.address}\`
+
+🔑 *Password:*
+\`${s.password}\`
+
+📥 *Inbox Commands:*
+• /tempmail inbox
+• /tempmail read <id>
+
+⚠️ Use this mailbox for signups/OTP only.
+• 1 credit deducted`;
+      await sendFormattedMessage(ctx, msg);
       user.totalQueries++;
-    } else {
-      user.credits += 1;
-      await sendFormattedMessage(ctx, '❌ Failed to generate temp mail.\n💳 1 credit refunded');
+      return;
     }
-  } catch (error) {
-    console.error('Error in tempmail command:', error);
-    user.credits += 1;
-    await sendFormattedMessage(ctx, '❌ An error occurred while generating temp mail.\n💳 1 credit refunded');
+
+    if (action === 'me') {
+      const s = await ensureSession(ctx);
+      const msg = `📨 *Your Current TempMail*\n\n\`${s.address}\`\n\nUse: /tempmail inbox`;
+      return sendFormattedMessage(ctx, msg);
+    }
+
+    if (action === 'inbox') {
+      const s = await ensureSession(ctx);
+      const items = await mailtmListMessages(s.token);
+
+      if (!items.length) {
+        return sendFormattedMessage(ctx, `📭 Inbox is empty\n\nEmail: \`${s.address}\`\nTip: wait 10-30 seconds and run /tempmail inbox again.`);
+      }
+
+      const lines = items.slice(0, 15).map((m, i) => {
+        const from = m?.from?.address || m?.from?.name || 'Unknown';
+        const subject = m?.subject || '(no subject)';
+        const id = m?.id || '';
+        const seen = m?.seen ? '✅' : '🆕';
+        return `${seen} *${i + 1}.* ${escapeMd(subject)}\n   From: ${escapeMd(from)}\n   ID: \`${escapeMd(id)}\``;
+      }).join('\n\n');
+
+      const msg = `📥 *Inbox (showing up to 15)*\nEmail: \`${s.address}\`\n\n${lines}\n\nUse: /tempmail read <id>`;
+      return sendFormattedMessage(ctx, msg);
+    }
+
+    if (action === 'read') {
+      const id = rest.join(' ').trim();
+      if (!id) return sendFormattedMessage(ctx, '🧾 Usage: /tempmail read <message_id>');
+
+      const s = await ensureSession(ctx);
+      const m = await mailtmReadMessage(s.token, id);
+
+      const from = m?.from?.address || m?.from?.name || 'Unknown';
+      const subject = m?.subject || '(no subject)';
+      const text = (m?.text || m?.intro || '').toString();
+      const html = (m?.html && Array.isArray(m.html) ? m.html.join('\n') : (m?.html || '')).toString();
+
+      const body = text || html || '(no body)';
+      const shortBody = body.length > 3500 ? body.slice(0, 3500) + '\n…(trimmed)…' : body;
+
+      const msg = `🧾 *Message*\n\n*Subject:* ${escapeMd(subject)}\n*From:* ${escapeMd(from)}\n*ID:* \`${escapeMd(id)}\`\n\n${escapeMd(shortBody)}`;
+      return sendFormattedMessage(ctx, msg);
+    }
+
+    // unknown subcommand
+    return sendFormattedMessage(ctx, `📨 Usage:\n• /tempmail new\n• /tempmail me\n• /tempmail inbox\n• /tempmail read <id>`);
+  } catch (e) {
+    console.error('tempmail error:', e?.message || e);
+    // If action was 'new' we already deducted 1 credit; refund on failure
+    if ((action === 'new') && user && !user.isPremium) user.credits += 1;
+    return sendFormattedMessage(ctx, `❌ TempMail failed. Try again.\n\nTip: /tempmail new`);
   }
 });
-
 bot.command('vehicle', async (ctx) => {
   const user = getOrCreateUser(ctx);
   if (!user || !user.isApproved) {
@@ -3044,44 +3215,6 @@ bot.command('useragent', async (ctx) => {
   }
 });
 
-bot.command('tempmail', async (ctx) => {
-  const user = getOrCreateUser(ctx);
-  if (!user || !user.isApproved) {
-    await sendFormattedMessage(ctx, '❌ You need to be approved to use this command. Use /register to submit your request.');
-    return;
-  }
-
-  try {
-    const result = generateTempEmail();
-    
-    if (result.success && result.data) {
-      const response = `📧 Temporary Email Generated 📧
-
-🔑 Email Address:
-\`${result.data.email}\`
-
-⏰ Details:
-• Expires in: ${result.data.expires_in}
-• Domain: ${result.data.domain}
-
-💡 Important Notes:
-• This email will expire automatically
-• Use for temporary registrations only
-• Don't use for important communications
-• Check the inbox regularly
-
-🔒 Privacy protected - No logs stored`;
-
-      await sendFormattedMessage(ctx, response);
-      user.totalQueries++;
-    } else {
-      await sendFormattedMessage(ctx, '❌ Failed to generate temporary email.');
-    }
-  } catch (error) {
-    console.error('Error in tempmail command:', error);
-    await sendFormattedMessage(ctx, '❌ An error occurred while generating temporary email.');
-  }
-});
 
 bot.command('stats', async (ctx) => {
   const user = getOrCreateUser(ctx);
@@ -3202,7 +3335,6 @@ bot.command('help', async (ctx) => {
 • /pincode 400001
 • /postoffice Delhi
 • /ifsc SBIN0001234
-• /thumb https://youtu.be/8of5w7RgcTc
 • /ig instagram
 • /igreels indiangamedevv
 • /pan ABCDE1234F
