@@ -18,6 +18,22 @@ function getCommandArgs(ctx) {
   const s = t.replace(/^\/\w+(?:@\w+)?\s*/i, '');
   return s.trim();
 }
+
+function formatYtProcessText(apiJson, processUrl) {
+  const percent = apiJson?.percent ?? '…';
+  const size = apiJson?.estimatedFileSize ?? (apiJson?.fileSize ? ((Number(apiJson.fileSize) / (1024*1024)).toFixed(2) + ' MB') : 'Unknown');
+  const name = apiJson?.fileName ?? 'video.mp4';
+  const status = apiJson?.fileUrl ?? 'In Processing...';
+
+  return (
+    '🎬 YouTube Processing\n\n' +
+    'Progress: ' + String(percent) + '\n' +
+    'Est. Size: ' + String(size) + '\n' +
+    'File: ' + String(name) + '\n' +
+    'Status: ' + String(status) + '\n' +
+    'Process: ' + String(processUrl)
+  );
+}
 // Robust GET helper with retries + HTML-block detection
 async function axiosGetWithRetry(url, opts = {}, attempts = 3) {
   const timeout = opts.timeout ?? 25000;
@@ -2892,7 +2908,7 @@ bot.callbackQuery(/^ytq_(1080|720|480)$/, async (ctx) => {
     }
 
     // show initial status
-    try { await ctx.editMessageText(formatYtProcessHtml(last, url), { parse_mode: 'HTML', disable_web_page_preview: true }); }
+    try { await ctx.editMessageText(formatYtProcessText(last, url), { disable_web_page_preview: true }); }
     catch (_) { try { await ctx.reply(formatYtProcessText(last, url), { parse_mode: 'Markdown' }); } catch (_) {} }
 
     const intervalMs = 2500;
