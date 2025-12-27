@@ -85,28 +85,21 @@ async function pollYtcontentProcess(processUrl, opts = {}) {
   return { ok: false, data: last, fileUrl: last?.fileUrl || null };
 }
 
-function makeProgressBar(percentStr, width = 12) {
-  const p = parseInt(String(percentStr || '').replace(/[^0-9]/g, ''), 10);
-  const pct = Number.isFinite(p) ? Math.max(0, Math.min(100, p)) : 0;
-  const filled = Math.round((pct / 100) * width);
-  return '▓'.repeat(filled) + '░'.repeat(Math.max(0, width - filled));
-}
-
+// HTML (no markdown symbols). Telegram shows real bold with <b>...</b>
 // HTML (no markdown symbols). Telegram shows real bold with <b>...</b>
 function formatYtProcessHtml(apiJson, processUrl) {
   const percent = apiJson?.percent ?? '…';
-  const bar = makeProgressBar(percent, 14);
   const size = apiJson?.estimatedFileSize ?? (apiJson?.fileSize ? ((Number(apiJson.fileSize) / (1024*1024)).toFixed(2) + ' MB') : 'Unknown');
   const name = apiJson?.fileName ?? 'video.mp4';
   const fileUrl = apiJson?.fileUrl ?? 'In Processing...';
 
   return (
-`🎬 <b>YouTube 1080p Processing</b>\n\n` +
-`<b>Progress:</b> ${escapeHtml(String(percent))}  <code>${bar}</code>\n` +
+`🎬 <b>YouTube Processing</b>\n\n` +
+`<b>Progress:</b> ${escapeHtml(String(percent))}\n` +
 `<b>Est. Size:</b> ${escapeHtml(String(size))}\n` +
 `<b>File:</b> <code>${escapeHtml(String(name))}</code>\n\n` +
-`<b>Process URL:</b>\n<code>${escapeHtml(String(processUrl))}</code>\n\n` +
-`<b>File URL:</b>\n<code>${escapeHtml(String(fileUrl))}</code>`
+`<b>Status:</b> <code>${escapeHtml(String(fileUrl))}</code>\n` +
+`<b>Process:</b> <code>${escapeHtml(String(processUrl))}</code>`
   );
 }
 
@@ -1569,6 +1562,57 @@ bot.command('autoregister', async (ctx) => {
   return ctx.reply(`✅ Auto-register is now: *${autoRegisterEnabled ? 'ON' : 'OFF'}*`, { parse_mode: 'Markdown' });
 });
 
+bot.command('approveall', async (ctx) => {
+  const caller = String(ctx.from?.id || '');
+  if (!caller || !isAdmin(caller)) return ctx.reply('❌ Only admins can use this command.');
+
+  if (autoRegisterEnabled) {
+    return ctx.reply('ℹ️ Auto-register is ON. Turn it OFF to use /approveall.', { disable_web_page_preview: true });
+  }
+
+  const pending = Array.from(registrationRequests.values());
+  if (!pending.length) {
+    return ctx.reply('✅ No pending registrations.', { disable_web_page_preview: true });
+  }
+
+  let approved = 0;
+  for (const req of pending) {
+    const targetId = String(req.telegramId || '');
+    if (!targetId) continue;
+
+    // Create/update user
+    const fakeCtx = ctx; // use current ctx to call getOrCreateUser safely
+    const user = users.get(targetId) || {
+      telegramId: targetId,
+      username: req.username,
+      firstName: req.firstName,
+      lastName: req.lastName,
+      isApproved: false,
+      credits: 0,
+      isPremium: false,
+      isAdmin: false,
+      totalQueries: 0,
+      registrationDate: new Date()
+    };
+
+    user.isApproved = true;
+    if (!user.credits || user.credits < 25) user.credits = 25;
+    users.set(targetId, user);
+    registeredUsers.add(targetId);
+    verifiedUsers.add(targetId);
+    registrationRequests.delete(targetId);
+
+    // Notify user
+    try {
+      await bot.api.sendMessage(targetId, '✅ Your registration has been approved! Use /start to open the menu.');
+    } catch (_) {}
+
+    approved++;
+  }
+
+  return ctx.reply(`✅ Approved ${approved} users.`, { disable_web_page_preview: true });
+});
+
 // ===============================
 // GLOBAL BOT LOCK MIDDLEWARE
 // ===============================
@@ -1645,11 +1689,19 @@ bot.use((ctx, next) => {
 // ===============================
 
 function mainMenuKeyboard(userId) {
-  // 2 buttons per row + last Help button (as requested)
-  return new InlineKeyboard()
+  const kb = new InlineKeyboard()
     .text("🔍 OSINT", "menu_osint").text("📥 Downloaders", "menu_dl").row()
     .text("🇮🇳 India", "menu_india").text("🏦 Banking", "menu_bank").row()
     .text("ℹ️ Help", "menu_help");
+
+  // Admin panel button (only for admins)
+  try {
+    if (isAdmin(String(userId))) {
+      kb.row().text("🛡️ Admin Panel", "menu_admin");
+    }
+  } catch (_) {}
+
+  return kb;
 }
 
 function backToMenuKeyboard() {
@@ -1857,6 +1909,34 @@ bot.callbackQuery("menu_help", async (ctx) => {
 • /dl <url>
 `;
   return safeEditOrReply(ctx, msg, backToMenuKeyboard());
+});
+
+// Menu: Admin Panel (Elite)
+bot.callbackQuery("menu_admin", async (ctx) => {
+  const caller = String(ctx.from?.id || '');
+  if (!caller || !isAdmin(caller)) {
+    return safeEditOrReply(ctx, "❌ Admins only.", backToMenuKeyboard());
+  }
+
+  const msg =
+`🛡️ <b>Admin Elite Panel</b>
+
+<b>Security</b>
+• ban &lt;id|@user&gt; — Ban user
+• unban &lt;id|@user&gt; — Unban user
+
+<b>Registration</b>
+• autoregister on|off — Toggle auto approval
+• approveall — Approve all pending (when autoregister OFF)
+
+<b>Maintenance</b>
+• maintenance on|off (if you have it)
+
+Tip: Use numeric user IDs for best results.`;
+
+  return try { await ctx.answerCallbackQuery(); } catch (_) {}
+  try { if (ctx.callbackQuery?.message) return await ctx.editMessageText(msg, { parse_mode: 'HTML', reply_markup: backToMenuKeyboard(), disable_web_page_preview: true }); } catch (_) {}
+  return ctx.reply(msg, { parse_mode: 'HTML', reply_markup: backToMenuKeyboard(), disable_web_page_preview: true });
 });
 
 // Registration command - Fixed to check Telegram API directly
